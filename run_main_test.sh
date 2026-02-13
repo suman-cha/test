@@ -24,23 +24,6 @@ NUM_QUESTIONS=${1:-50}  # Default 50, override with first argument
 mkdir -p results/main_test
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-echo "Running MATH (${NUM_QUESTIONS} Level 4-5 hard questions)..."
-echo "  Using difficulty filter: hard (Level 4-5 only)"
-echo "  Track A: Testing spammer robustness (0, 3, 5, 7, 8 spammers)"
-python -m src.agents.run_experiment \
-    --dataset math \
-    --num-questions ${NUM_QUESTIONS} \
-    --difficulty hard \
-    --output-dir results/main_test/math_${TIMESTAMP} \
-    --save-frequency 10 \
-    --track-a \
-    --spammer-counts 0,3,5,7,8 \
-    --verbose
-
-echo ""
-echo "========================================"
-echo ""
-
 echo "Running GSM8K (${NUM_QUESTIONS} questions from hardest problems)..."
 echo "  Using start-index 900 (multi-step reasoning problems)"
 echo "  Track A: Testing spammer robustness (0, 3, 5, 7, 8 spammers)"
@@ -56,12 +39,29 @@ python -m src.agents.run_experiment \
 
 echo ""
 echo "========================================"
+echo ""
+
+echo "Running MATH (${NUM_QUESTIONS} Level 4-5 hard questions)..."
+echo "  Using difficulty filter: hard (Level 4-5 only)"
+echo "  Track A: Testing spammer robustness (0, 3, 5, 7, 8 spammers)"
+python -m src.agents.run_experiment \
+    --dataset math \
+    --num-questions ${NUM_QUESTIONS} \
+    --difficulty hard \
+    --output-dir results/main_test/math_${TIMESTAMP} \
+    --save-frequency 10 \
+    --track-a \
+    --spammer-counts 0,3,5,7,8 \
+    --verbose
+
+echo ""
+echo "========================================"
 echo "Main Test Complete!"
 echo "========================================"
 echo ""
 echo "Results saved to:"
-echo "  - results/main_test/math_${TIMESTAMP}/ (MATH Level 4-5)"
 echo "  - results/main_test/gsm8k_${TIMESTAMP}/ (GSM8K hardest problems, index 900+)"
+echo "  - results/main_test/math_${TIMESTAMP}/ (MATH Level 4-5)"
 echo ""
 echo "To run with custom number of questions:"
 echo "  ./run_main_test.sh 100  # runs 100 questions per dataset"

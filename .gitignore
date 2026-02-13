@@ -10,6 +10,9 @@ env/
 dist/
 build/
 
+# Docs (contains API keys and test problem PDF)
+docs/
+
 # API Keys
 .env
 *.key

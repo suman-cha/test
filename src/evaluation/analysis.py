@@ -25,6 +25,13 @@ from scipy import stats
 sns.set_style('whitegrid')
 plt.rcParams['figure.figsize'] = (12, 8)
 
+# Algorithm keys as produced by run_experiment.py
+ALGORITHM_KEYS = {
+    'CCRR': {'correct': 'ccrr_correct', 'idx': 'ccrr_selected_idx', 'scores': 'ccrr_scores'},
+    'SVD': {'correct': 'svd_correct', 'idx': 'svd_selected_idx', 'scores': 'svd_scores'},
+    'SWRA v2': {'correct': 'swra_correct', 'idx': 'swra_selected_idx', 'scores': 'swra_scores'},
+}
+
 
 class ResultsAnalyzer:
     """Analyze and visualize experiment results."""
@@ -57,16 +64,32 @@ class ResultsAnalyzer:
 
         print(f"Loaded {len(self.results)} question results")
 
+    def _get_method_correctness(self, result: Dict, method_name: str) -> bool:
+        """
+        Get correctness for a method from a single result.
+
+        Args:
+            result: Single question result dict
+            method_name: Method name (algorithm name or baseline name)
+
+        Returns:
+            True if the method was correct for this question
+        """
+        # Check if it's an algorithm
+        if method_name in ALGORITHM_KEYS:
+            return result[ALGORITHM_KEYS[method_name]['correct']]
+        # Otherwise it's a baseline
+        return result['baseline_validations'][method_name]['correct']
+
     def analyze_accuracy(self) -> pd.DataFrame:
         """
-        Analyze accuracy of algorithm vs baselines.
+        Analyze accuracy of all algorithms and baselines.
 
         Returns:
             DataFrame with accuracy comparison
         """
         num_questions = len(self.results)
 
-        # Collect accuracies
         accuracies = {
             'Method': [],
             'Correct': [],
@@ -74,12 +97,13 @@ class ResultsAnalyzer:
             'Accuracy': []
         }
 
-        # Algorithm
-        algo_correct = sum(1 for r in self.results if r['algorithm_correct'])
-        accuracies['Method'].append('Hammer-Spammer')
-        accuracies['Correct'].append(algo_correct)
-        accuracies['Total'].append(num_questions)
-        accuracies['Accuracy'].append(algo_correct / num_questions * 100)
+        # All three algorithms
+        for algo_name, keys in ALGORITHM_KEYS.items():
+            correct = sum(1 for r in self.results if r[keys['correct']])
+            accuracies['Method'].append(algo_name)
+            accuracies['Correct'].append(correct)
+            accuracies['Total'].append(num_questions)
+            accuracies['Accuracy'].append(correct / num_questions * 100)
 
         # Baselines
         baseline_names = list(self.results[0]['baseline_validations'].keys())
@@ -96,46 +120,34 @@ class ResultsAnalyzer:
 
         return df
 
-    def statistical_comparison(self, method1: str = 'Hammer-Spammer',
+    def statistical_comparison(self, method1: str = 'CCRR',
                               method2: str = 'majority_voting') -> Dict[str, Any]:
         """
         Perform statistical comparison between two methods.
 
         Args:
-            method1: First method name
-            method2: Second method name
+            method1: First method name (algorithm or baseline)
+            method2: Second method name (algorithm or baseline)
 
         Returns:
             Dictionary with statistical test results
         """
-        # Get correctness for each question
         results1 = []
         results2 = []
 
         for r in self.results:
-            # Method 1
-            if method1 == 'Hammer-Spammer':
-                results1.append(1 if r['algorithm_correct'] else 0)
-            else:
-                results1.append(1 if r['baseline_validations'][method1]['correct'] else 0)
-
-            # Method 2
-            if method2 == 'Hammer-Spammer':
-                results2.append(1 if r['algorithm_correct'] else 0)
-            else:
-                results2.append(1 if r['baseline_validations'][method2]['correct'] else 0)
+            results1.append(1 if self._get_method_correctness(r, method1) else 0)
+            results2.append(1 if self._get_method_correctness(r, method2) else 0)
 
         results1 = np.array(results1)
         results2 = np.array(results2)
 
-        # Perform McNemar's test (for paired binary data)
-        # Contingency table
+        # McNemar's test (for paired binary data)
         both_correct = np.sum((results1 == 1) & (results2 == 1))
         method1_only = np.sum((results1 == 1) & (results2 == 0))
         method2_only = np.sum((results1 == 0) & (results2 == 1))
         both_wrong = np.sum((results1 == 0) & (results2 == 0))
 
-        # McNemar's test
         if method1_only + method2_only > 0:
             mcnemar_stat = (abs(method1_only - method2_only) - 1)**2 / (method1_only + method2_only)
             p_value = 1 - stats.chi2.cdf(mcnemar_stat, 1)
@@ -143,7 +155,6 @@ class ResultsAnalyzer:
             mcnemar_stat = 0
             p_value = 1.0
 
-        # Effect size (difference in accuracies)
         acc1 = np.mean(results1) * 100
         acc2 = np.mean(results2) * 100
         diff = acc1 - acc2
@@ -163,20 +174,25 @@ class ResultsAnalyzer:
             'significant': p_value < 0.05
         }
 
-    def analyze_agent_quality(self) -> pd.DataFrame:
+    def analyze_agent_quality(self, algorithm: str = 'CCRR') -> pd.DataFrame:
         """
         Analyze agent quality scores across all questions.
+
+        Args:
+            algorithm: Which algorithm's scores to use ('CCRR', 'SVD', or 'SWRA v2')
 
         Returns:
             DataFrame with agent quality statistics
         """
         N = self.config['num_agents']
+        scores_key = ALGORITHM_KEYS[algorithm]['scores']
+        idx_key = ALGORITHM_KEYS[algorithm]['idx']
 
         # Collect quality scores for each agent
         all_scores = [[] for _ in range(N)]
 
         for r in self.results:
-            quality_scores = r['quality_scores']
+            quality_scores = r[scores_key]
             for i, score in enumerate(quality_scores):
                 all_scores[i].append(score)
 
@@ -193,7 +209,7 @@ class ResultsAnalyzer:
         for i in range(N):
             scores = all_scores[i]
             times_selected = sum(1 for r in self.results
-                                if r['algorithm_selected_idx'] == i)
+                                if r[idx_key] == i)
 
             agent_stats['Agent'].append(f"Agent {i}")
             agent_stats['Mean_Quality'].append(np.mean(scores))
@@ -218,14 +234,15 @@ class ResultsAnalyzer:
 
         plt.figure(figsize=(12, 6))
 
-        # Bar plot
-        colors = ['#2ecc71' if m == 'Hammer-Spammer' else '#3498db'
+        # Color algorithms differently from baselines
+        algo_names = set(ALGORITHM_KEYS.keys())
+        colors = ['#2ecc71' if m in algo_names else '#3498db'
                  for m in df['Method']]
 
         plt.barh(df['Method'], df['Accuracy'], color=colors)
         plt.xlabel('Accuracy (%)', fontsize=12)
         plt.ylabel('Method', fontsize=12)
-        plt.title('Accuracy Comparison: Hammer-Spammer vs Baselines', fontsize=14, fontweight='bold')
+        plt.title('Accuracy Comparison: Algorithms vs Baselines', fontsize=14, fontweight='bold')
         plt.xlim(0, 100)
 
         # Add value labels
@@ -240,14 +257,15 @@ class ResultsAnalyzer:
 
         plt.show()
 
-    def plot_agent_quality(self, output_path: Optional[str] = None):
+    def plot_agent_quality(self, output_path: Optional[str] = None, algorithm: str = 'CCRR'):
         """
         Plot agent quality distribution.
 
         Args:
             output_path: Path to save plot (optional)
+            algorithm: Which algorithm's scores to use
         """
-        df = self.analyze_agent_quality()
+        df = self.analyze_agent_quality(algorithm=algorithm)
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
 
@@ -256,14 +274,14 @@ class ResultsAnalyzer:
         ax1.barh(df['Agent'], df['Mean_Quality'], color=colors, xerr=df['Std_Quality'])
         ax1.set_xlabel('Quality Score', fontsize=12)
         ax1.set_ylabel('Agent', fontsize=12)
-        ax1.set_title('Agent Quality Scores (Mean ± Std)', fontsize=12, fontweight='bold')
+        ax1.set_title(f'Agent Quality Scores - {algorithm} (Mean +/- Std)', fontsize=12, fontweight='bold')
         ax1.grid(axis='x', alpha=0.3)
 
         # Plot 2: Times selected
         ax2.barh(df['Agent'], df['Times_Selected'], color=colors)
         ax2.set_xlabel('Number of Times Selected', fontsize=12)
         ax2.set_ylabel('Agent', fontsize=12)
-        ax2.set_title('Selection Frequency by Agent', fontsize=12, fontweight='bold')
+        ax2.set_title(f'Selection Frequency by Agent - {algorithm}', fontsize=12, fontweight='bold')
         ax2.grid(axis='x', alpha=0.3)
 
         plt.tight_layout()
@@ -274,14 +292,15 @@ class ResultsAnalyzer:
 
         plt.show()
 
-    def plot_quality_vs_selection(self, output_path: Optional[str] = None):
+    def plot_quality_vs_selection(self, output_path: Optional[str] = None, algorithm: str = 'CCRR'):
         """
         Plot quality score vs selection rate.
 
         Args:
             output_path: Path to save plot (optional)
+            algorithm: Which algorithm's scores to use
         """
-        df = self.analyze_agent_quality()
+        df = self.analyze_agent_quality(algorithm=algorithm)
 
         plt.figure(figsize=(10, 6))
 
@@ -295,15 +314,16 @@ class ResultsAnalyzer:
 
         plt.xlabel('Mean Quality Score', fontsize=12)
         plt.ylabel('Number of Times Selected', fontsize=12)
-        plt.title('Agent Quality vs Selection Frequency', fontsize=14, fontweight='bold')
+        plt.title(f'Agent Quality vs Selection Frequency - {algorithm}', fontsize=14, fontweight='bold')
         plt.grid(alpha=0.3)
 
         # Add trend line
-        z = np.polyfit(df['Mean_Quality'], df['Times_Selected'], 1)
-        p = np.poly1d(z)
-        x_line = np.linspace(df['Mean_Quality'].min(), df['Mean_Quality'].max(), 100)
-        plt.plot(x_line, p(x_line), "r--", alpha=0.5, label='Trend')
-        plt.legend()
+        if len(df) > 1:
+            z = np.polyfit(df['Mean_Quality'], df['Times_Selected'], 1)
+            p = np.poly1d(z)
+            x_line = np.linspace(df['Mean_Quality'].min(), df['Mean_Quality'].max(), 100)
+            plt.plot(x_line, p(x_line), "r--", alpha=0.5, label='Trend')
+            plt.legend()
 
         plt.tight_layout()
 
@@ -346,28 +366,29 @@ class ResultsAnalyzer:
         lines.append(df_acc.to_string(index=False))
         lines.append("")
 
-        # Statistical comparison
-        lines.append("STATISTICAL COMPARISON")
+        # Statistical comparisons for each algorithm vs majority voting
+        lines.append("STATISTICAL COMPARISONS (vs Majority Voting)")
         lines.append("-"*80)
-        stat_result = self.statistical_comparison()
-        lines.append(f"Comparing: {stat_result['method1']} vs {stat_result['method2']}")
-        lines.append(f"  {stat_result['method1']} accuracy: {stat_result['method1_accuracy']:.2f}%")
-        lines.append(f"  {stat_result['method2']} accuracy: {stat_result['method2_accuracy']:.2f}%")
-        lines.append(f"  Difference: {stat_result['difference']:+.2f}%")
-        lines.append(f"  McNemar's test: χ² = {stat_result['mcnemar_statistic']:.4f}, p = {stat_result['p_value']:.4f}")
-        lines.append(f"  Statistically significant: {'YES' if stat_result['significant'] else 'NO'} (α=0.05)")
-        lines.append("")
-        lines.append(f"Contingency table:")
-        lines.append(f"  Both correct: {stat_result['both_correct']}")
-        lines.append(f"  {stat_result['method1']} only: {stat_result['method1_only']}")
-        lines.append(f"  {stat_result['method2']} only: {stat_result['method2_only']}")
-        lines.append(f"  Both wrong: {stat_result['both_wrong']}")
+
+        for algo_name in ALGORITHM_KEYS:
+            stat_result = self.statistical_comparison(method1=algo_name, method2='majority_voting')
+            lines.append(f"\n{algo_name} vs majority_voting:")
+            lines.append(f"  {algo_name} accuracy: {stat_result['method1_accuracy']:.2f}%")
+            lines.append(f"  majority_voting accuracy: {stat_result['method2_accuracy']:.2f}%")
+            lines.append(f"  Difference: {stat_result['difference']:+.2f}%")
+            lines.append(f"  McNemar's test: chi2 = {stat_result['mcnemar_statistic']:.4f}, p = {stat_result['p_value']:.4f}")
+            lines.append(f"  Statistically significant: {'YES' if stat_result['significant'] else 'NO'} (alpha=0.05)")
+            lines.append(f"  Contingency: both_correct={stat_result['both_correct']}, "
+                        f"{algo_name}_only={stat_result['method1_only']}, "
+                        f"mv_only={stat_result['method2_only']}, "
+                        f"both_wrong={stat_result['both_wrong']}")
+
         lines.append("")
 
-        # Agent quality analysis
-        lines.append("AGENT QUALITY ANALYSIS")
+        # Agent quality analysis (using CCRR as primary)
+        lines.append("AGENT QUALITY ANALYSIS (CCRR scores)")
         lines.append("-"*80)
-        df_quality = self.analyze_agent_quality()
+        df_quality = self.analyze_agent_quality(algorithm='CCRR')
         lines.append(df_quality.to_string(index=False))
         lines.append("")
 
@@ -384,18 +405,19 @@ class ResultsAnalyzer:
         lines.append("CONCLUSIONS")
         lines.append("-"*80)
 
-        # Determine if algorithm outperforms baseline
-        algo_acc = stat_result['method1_accuracy']
-        baseline_acc = stat_result['method2_accuracy']
+        # Compare CCRR (primary algorithm) vs majority voting
+        stat_ccrr = self.statistical_comparison(method1='CCRR', method2='majority_voting')
+        algo_acc = stat_ccrr['method1_accuracy']
+        baseline_acc = stat_ccrr['method2_accuracy']
 
-        if algo_acc > baseline_acc and stat_result['significant']:
-            lines.append(f"✓ The Hammer-Spammer algorithm OUTPERFORMS majority voting")
-            lines.append(f"  with a statistically significant improvement of {stat_result['difference']:.2f}%.")
+        if algo_acc > baseline_acc and stat_ccrr['significant']:
+            lines.append(f"The CCRR algorithm OUTPERFORMS majority voting")
+            lines.append(f"  with a statistically significant improvement of {stat_ccrr['difference']:.2f}%.")
         elif algo_acc > baseline_acc:
-            lines.append(f"≈ The Hammer-Spammer algorithm performs slightly better than majority voting")
-            lines.append(f"  ({stat_result['difference']:.2f}%), but the difference is not statistically significant.")
+            lines.append(f"The CCRR algorithm performs slightly better than majority voting")
+            lines.append(f"  ({stat_ccrr['difference']:.2f}%), but the difference is not statistically significant.")
         else:
-            lines.append(f"✗ The Hammer-Spammer algorithm does not outperform majority voting.")
+            lines.append(f"The CCRR algorithm does not outperform majority voting.")
 
         lines.append("")
 

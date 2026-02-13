@@ -30,8 +30,8 @@ class HammerSpammerRanking:
         Initialize Hammer-Spammer ranking algorithm.
 
         Args:
-            beta: Quality gap parameter (hammers have quality ≈ β + ε, spammers ≈ ε)
-            epsilon: Minimum quality threshold
+            beta: Bradley-Terry discrimination parameter in [1, 10]
+            epsilon: Prior probability of an agent being a spammer
         """
         self.beta = beta
         self.epsilon = epsilon
@@ -212,82 +212,87 @@ class HammerSpammerRanking:
 
 # Additional utility functions
 
-def simulate_comparison_matrix(N: int, num_hammers: int, beta: float = 5.0,
-                              epsilon: float = 0.1, noise: float = 0.1) -> Tuple[np.ndarray, np.ndarray]:
+def simulate_comparison_matrix(N: int, beta: float = 5.0,
+                              epsilon: float = 0.1) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Simulate a comparison matrix following the Hammer-Spammer model.
+    Simulate a comparison matrix following the Hammer-Spammer model
+    as specified in the problem statement.
 
-    This is useful for testing and validation.
+    Model:
+        - s_i ~ U(0, 1) for each agent i
+        - z_i ∈ {H, S} with P(z_i = S) = epsilon
+        - Hammer (z_i = H): P(R_ij = 1 | s, z_i = H) = sigma(beta * (s_i - s_j))
+        - Spammer (z_i = S): R_ij ~ uniform({-1, 1})
+        - R_ii = 1 for all i
 
     Args:
         N: Number of agents
-        num_hammers: Number of high-quality agents (hammers)
-        beta: Quality gap parameter
-        epsilon: Minimum quality
-        noise: Noise level in comparisons
+        beta: Bradley-Terry discrimination parameter (in [1, 10])
+        epsilon: Probability of being a spammer
 
     Returns:
-        Tuple of (comparison_matrix, true_qualities)
+        Tuple of (comparison_matrix, true_scores, agent_types)
+        where agent_types[i] = 1 for hammer, 0 for spammer
     """
-    # Generate true qualities
-    qualities = np.zeros(N)
-    qualities[:num_hammers] = beta + epsilon  # Hammers
-    qualities[num_hammers:] = epsilon  # Spammers
+    # Generate true latent scores: s_i ~ U(0, 1)
+    scores = np.random.uniform(0, 1, N)
 
-    # Shuffle
-    np.random.shuffle(qualities)
+    # Generate agent types: z_i ∈ {H, S}
+    agent_types = (np.random.random(N) >= epsilon).astype(int)  # 1=hammer, 0=spammer
 
     # Generate comparison matrix
-    R = np.zeros((N, N))
+    R = np.ones((N, N), dtype=int)
 
     for i in range(N):
         for j in range(N):
             if i == j:
                 R[i, j] = 1  # Diagonal
+            elif agent_types[i] == 1:
+                # Hammer: P(R_ij = 1) = sigma(beta * (s_i - s_j))
+                prob = 1.0 / (1.0 + np.exp(-beta * (scores[i] - scores[j])))
+                R[i, j] = 1 if np.random.random() < prob else -1
             else:
-                # Probability that i prefers its own answer
-                # Higher quality -> more likely to prefer own answer
-                prob_i_better = 1 / (1 + np.exp(-(qualities[i] - qualities[j])))
+                # Spammer: R_ij ~ uniform({-1, 1})
+                R[i, j] = 1 if np.random.random() < 0.5 else -1
 
-                # Add noise
-                prob_i_better = prob_i_better * (1 - noise) + 0.5 * noise
-
-                # Sample
-                if np.random.random() < prob_i_better:
-                    R[i, j] = 1
-                else:
-                    R[i, j] = -1
-
-    return R, qualities
+    return R, scores, agent_types
 
 
 if __name__ == "__main__":
     # Test the algorithm
     print("Testing Hammer-Spammer Ranking Algorithm...")
 
-    # Simulate a comparison matrix
+    np.random.seed(42)
+
+    # Simulate a comparison matrix using the correct model
     print("\n=== Simulating Comparison Matrix ===")
     N = 15
-    num_hammers = 5
     beta = 5.0
+    epsilon = 0.3  # 30% spammer rate
 
-    R, true_qualities = simulate_comparison_matrix(N, num_hammers, beta=beta)
+    R, true_scores, agent_types = simulate_comparison_matrix(N, beta=beta, epsilon=epsilon)
 
-    print(f"Generated {N} agents with {num_hammers} hammers")
-    print(f"True qualities (first 5): {true_qualities[:5]}")
+    num_hammers = np.sum(agent_types == 1)
+    num_spammers = np.sum(agent_types == 0)
+    print(f"Generated {N} agents: {num_hammers} hammers, {num_spammers} spammers")
+    print(f"True scores (first 5): {true_scores[:5]}")
+    print(f"Agent types (first 5): {['H' if t else 'S' for t in agent_types[:5]]}")
     print(f"\nComparison matrix R (shape {R.shape}):")
     print(f"  Positive: {np.sum(R == 1)} ({100*np.sum(R == 1)/R.size:.1f}%)")
     print(f"  Negative: {np.sum(R == -1)} ({100*np.sum(R == -1)/R.size:.1f}%)")
 
     # Apply algorithm
     print("\n\n=== Applying Hammer-Spammer Algorithm ===")
-    algorithm = HammerSpammerRanking(beta=beta)
+    algorithm = HammerSpammerRanking(beta=beta, epsilon=epsilon)
 
     best_idx, quality_scores = algorithm.select_best(R, return_scores=True)
 
+    true_best = np.argmax(true_scores)
     print(f"\nSelected best answer: Agent {best_idx}")
     print(f"Quality score: {quality_scores[best_idx]:.4f}")
-    print(f"True quality: {true_qualities[best_idx]:.4f}")
+    print(f"True score: {true_scores[best_idx]:.4f}")
+    print(f"True best agent: {true_best} (score: {true_scores[true_best]:.4f})")
+    print(f"Correct selection: {best_idx == true_best}")
 
     # Identify hammers and spammers
     print("\n\n=== Identifying Hammers and Spammers ===")
@@ -304,13 +309,13 @@ if __name__ == "__main__":
     # Print diagnostics
     algorithm.print_diagnostics()
 
-    # Compare with true qualities
-    print("\n\n=== Comparison with True Qualities ===")
-    print(f"Correlation: {np.corrcoef(quality_scores, true_qualities)[0,1]:.4f}")
+    # Compare with true scores
+    print("\n\n=== Comparison with True Scores ===")
+    print(f"Correlation: {np.corrcoef(quality_scores, true_scores)[0,1]:.4f}")
 
     # Test ranking
     print("\n\n=== Ranking All Answers ===")
     ranking = algorithm.rank_all_answers(R)
     print(f"Top 5 agents by estimated quality: {ranking[:5]}")
-    true_ranking = np.argsort(true_qualities)[::-1]
-    print(f"Top 5 agents by true quality: {true_ranking[:5]}")
+    true_ranking = np.argsort(true_scores)[::-1]
+    print(f"Top 5 agents by true score: {true_ranking[:5]}")

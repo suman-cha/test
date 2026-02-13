@@ -201,7 +201,8 @@ class ExperimentRunner:
                 oracle_validation = self.validator.validate_with_oracle(
                     question=question,
                     selected_answer=ccrr_answer,
-                    all_answers=answer_strings
+                    all_answers=answer_strings,
+                    selected_idx=ccrr_idx
                 )
             except Exception as e:
                 print(f"Oracle validation failed: {e}")

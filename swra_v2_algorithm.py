@@ -108,12 +108,6 @@ def swra_v2(R, k=2, max_iter=15, tol=1e-6):
         peer = -R_tilde.T @ weights
         
         # Combine: normalize and add
-        for signal in [gated, peer]:
-            s_norm = signal - signal.mean()
-            s_std = s_norm.std()
-            if s_std > 1e-12:
-                s_norm = s_norm / s_std
-        
         gated_norm = (gated - gated.mean())
         gated_std = gated_norm.std()
         if gated_std > 1e-12:

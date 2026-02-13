@@ -75,7 +75,8 @@ class Validator:
         }
 
     def validate_with_oracle(self, question: str, selected_answer: str,
-                           all_answers: List[str], max_retries: int = 3) -> Dict[str, Any]:
+                           all_answers: List[str], selected_idx: Optional[int] = None,
+                           max_retries: int = 3) -> Dict[str, Any]:
         """
         Use Oracle Model (GPT-4o) to evaluate quality.
 
@@ -88,6 +89,7 @@ class Validator:
             question: The original question
             selected_answer: The answer selected by the algorithm
             all_answers: All N answers from agents
+            selected_idx: Index of the selected answer (avoids ambiguity with duplicates)
             max_retries: Maximum retry attempts
 
         Returns:
@@ -101,6 +103,13 @@ class Validator:
             raise ValueError("API key required for oracle validation")
 
         self.oracle_calls += 1
+
+        # Resolve selected index safely (handle duplicate answers)
+        if selected_idx is None:
+            try:
+                selected_idx = all_answers.index(selected_answer)
+            except ValueError:
+                selected_idx = 0
 
         # Format all answers for the oracle
         answers_text = "\n\n".join([
@@ -117,12 +126,12 @@ Here are {len(all_answers)} different answers:
 {answers_text}
 
 Tasks:
-1. Grade Answer {all_answers.index(selected_answer) + 1} on a scale of 0-10 for correctness and quality.
+1. Grade Answer {selected_idx + 1} on a scale of 0-10 for correctness and quality.
 2. Identify which answer is the BEST (most correct and well-reasoned).
 3. Provide brief reasoning for your evaluation.
 
 Respond in the following format:
-SCORE: [0-10 score for Answer {all_answers.index(selected_answer) + 1}]
+SCORE: [0-10 score for Answer {selected_idx + 1}]
 BEST: [number of the best answer]
 REASONING: [your explanation]
 """
@@ -145,7 +154,6 @@ REASONING: [your explanation]
                     reasoning = self._extract_reasoning(content)
 
                     # Check if selection matches oracle
-                    selected_idx = all_answers.index(selected_answer)
                     matches_oracle = (selected_idx == best_idx)
 
                     return {
@@ -167,7 +175,7 @@ REASONING: [your explanation]
                         'oracle_best_idx': 0,
                         'matches_oracle': False,
                         'oracle_reasoning': f"Error: {e}",
-                        'selected_idx': all_answers.index(selected_answer)
+                        'selected_idx': selected_idx
                     }
 
     def _make_oracle_call(self, messages: list) -> Dict[str, Any]:
@@ -358,7 +366,7 @@ REASONING: [brief explanation]
         if len(scores) < num_answers:
             scores = []
             for i in range(1, num_answers + 1):
-                pattern = f'Answer {i}:?\s*(\d+(?:\.\d+)?)'
+                pattern = rf'Answer {i}:?\s*(\d+(?:\.\d+)?)'
                 match = re.search(pattern, text, re.IGNORECASE)
                 if match:
                     scores.append(float(match.group(1)))

@@ -151,9 +151,8 @@ class AgentSystem:
             # Parallel execution
             # Comparisons are simpler than generation, so use more workers
             with ThreadPoolExecutor(max_workers=min(8, total_comparisons)) as executor:
-                # Submit all comparison tasks
-                futures = []
-                tasks = []
+                # Submit all comparison tasks with future-to-task mapping
+                future_to_task = {}
 
                 for i in range(self.N):
                     for j in range(self.N):
@@ -164,14 +163,14 @@ class AgentSystem:
                                 answers[i]['answer'],
                                 answers[j]['answer']
                             )
-                            futures.append(future)
-                            tasks.append((i, j))
+                            future_to_task[future] = (i, j)
 
                 # Collect results with progress bar
                 if verbose:
-                    pbar = tqdm(total=len(futures), desc="Pairwise comparisons")
+                    pbar = tqdm(total=len(future_to_task), desc="Pairwise comparisons")
 
-                for future, (i, j) in zip(as_completed(futures), tasks):
+                for future in as_completed(future_to_task):
+                    i, j = future_to_task[future]
                     try:
                         result = future.result()
                         R[i, j] = result

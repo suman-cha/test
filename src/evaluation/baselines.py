@@ -130,6 +130,71 @@ class Baselines:
 
 
     @staticmethod
+    def row_sum(comparison_matrix: np.ndarray) -> int:
+        """
+        Row-sum baseline: select agent with highest row sum in R.
+
+        This is the most natural rank-aggregation baseline for pairwise
+        comparison matrices. The row sum counts how many agents each
+        agent judges itself to be better than.
+
+        Args:
+            comparison_matrix: N×N comparison matrix R with values in {-1, 1}
+
+        Returns:
+            Index of agent with highest row sum (excluding diagonal)
+        """
+        R = comparison_matrix.astype(float).copy()
+        np.fill_diagonal(R, 0.0)  # Exclude self-comparisons
+        row_sums = R.sum(axis=1)
+        return int(np.argmax(row_sums))
+
+    @staticmethod
+    def column_sum(comparison_matrix: np.ndarray) -> int:
+        """
+        Column-sum baseline: select agent with lowest column sum in R.
+
+        R[j,i] = -1 means agent j thinks agent i is better.
+        A low column sum means many agents think this agent is better.
+
+        Args:
+            comparison_matrix: N×N comparison matrix R with values in {-1, 1}
+
+        Returns:
+            Index of agent with lowest column sum (best peer assessment)
+        """
+        R = comparison_matrix.astype(float).copy()
+        np.fill_diagonal(R, 0.0)  # Exclude self-comparisons
+        col_sums = R.sum(axis=0)
+        return int(np.argmin(col_sums))
+
+    @staticmethod
+    def borda_count(comparison_matrix: np.ndarray) -> int:
+        """
+        Borda count baseline: combine row and column rankings.
+
+        Averages the row-sum rank and column-sum rank for each agent.
+
+        Args:
+            comparison_matrix: N×N comparison matrix R with values in {-1, 1}
+
+        Returns:
+            Index of agent with best combined Borda score
+        """
+        R = comparison_matrix.astype(float).copy()
+        np.fill_diagonal(R, 0.0)
+
+        row_sums = R.sum(axis=1)
+        col_sums = -R.sum(axis=0)  # Negate so higher = better
+
+        # Convert to ranks (higher value = better rank)
+        row_ranks = np.argsort(np.argsort(row_sums)).astype(float)
+        col_ranks = np.argsort(np.argsort(col_sums)).astype(float)
+
+        combined = row_ranks + col_ranks
+        return int(np.argmax(combined))
+
+    @staticmethod
     def apply_all_baselines(answers: List[str],
                            comparison_matrix: np.ndarray = None,
                            weights: List[float] = None) -> Dict[str, int]:
@@ -151,6 +216,12 @@ class Baselines:
         results['majority_voting'] = Baselines.majority_voting(answers)
         results['best_single_model'] = Baselines.best_single_model()
         results['random'] = Baselines.random_selection(N, seed=42)
+
+        # Matrix-based baselines (if comparison matrix provided)
+        if comparison_matrix is not None:
+            results['row_sum'] = Baselines.row_sum(comparison_matrix)
+            results['column_sum'] = Baselines.column_sum(comparison_matrix)
+            results['borda_count'] = Baselines.borda_count(comparison_matrix)
 
         # Weighted baselines if weights provided
         if weights is not None:

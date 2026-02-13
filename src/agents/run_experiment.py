@@ -441,13 +441,41 @@ class ExperimentRunner:
                     answer_strings_new = answer_strings_orig.copy()
                     spammer_indices = np.where(spammer_mask)[0]
 
-                    # For each spammer, replace their answer with a random different answer
+                    # For each spammer, replace their answer with a WRONG answer
                     np.random.seed(trial * 1000 + result['question_idx'])
                     for spammer_idx in spammer_indices:
-                        # Pick a random different answer from the pool (not their own)
-                        available_answers = [ans for i, ans in enumerate(answer_strings_orig) if i != spammer_idx]
-                        if available_answers:
-                            answer_strings_new[spammer_idx] = np.random.choice(available_answers)
+                        # Strategy 1: Try to use actual wrong answers from the pool
+                        wrong_answers = [
+                            ans for i, ans in enumerate(answer_strings_orig)
+                            if i != spammer_idx and not check_correct(ans, gt, self.api_key)
+                        ]
+
+                        if wrong_answers:
+                            # Use an actual wrong answer from the pool (most realistic)
+                            answer_strings_new[spammer_idx] = np.random.choice(wrong_answers)
+                        else:
+                            # Strategy 2: Generate a wrong answer based on GT
+                            # For numeric answers, add random offset from GT
+                            import re
+                            try:
+                                # Try to extract numeric value from GT
+                                gt_match = re.search(r'-?\d+\.?\d*', str(gt))
+                                if gt_match:
+                                    gt_num = float(gt_match.group())
+                                    # Add large random offset to ensure it's wrong
+                                    offset = np.random.choice([-100, -50, -20, -10, 10, 20, 50, 100])
+                                    wrong_num = gt_num + offset
+                                    # Format as integer if GT was integer
+                                    if gt_num == int(gt_num):
+                                        answer_strings_new[spammer_idx] = str(int(wrong_num))
+                                    else:
+                                        answer_strings_new[spammer_idx] = str(wrong_num)
+                                else:
+                                    # Non-numeric GT: use fixed wrong marker
+                                    answer_strings_new[spammer_idx] = "WRONG_ANSWER"
+                            except:
+                                # Parsing failed: use fixed wrong marker
+                                answer_strings_new[spammer_idx] = "WRONG_ANSWER"
 
                     # Re-run algorithms on modified data
                     ccrr_new = CCRRanking(beta=5.0, epsilon=0.1)

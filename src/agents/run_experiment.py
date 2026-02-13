@@ -29,6 +29,7 @@ from src.utils.dataset import DatasetLoader
 from src.agents.agent_config import AGENT_CONFIGS
 from src.agents.agent_system import AgentSystem
 from src.algorithm.hammer_spammer import HammerSpammerRanking
+from src.algorithm.ccrr import CCRRanking
 from src.evaluation.validator import Validator
 from src.evaluation.baselines import Baselines
 
@@ -75,12 +76,19 @@ class ExperimentRunner:
             parallel_comparison=config['parallel_comparison']
         )
 
-        # Initialize algorithm
-        print(f"\nInitializing Hammer-Spammer algorithm (beta={config['beta']})...")
-        self.algorithm = HammerSpammerRanking(
+        # Initialize algorithms
+        print(f"\nInitializing algorithms (beta={config['beta']})...")
+        self.algorithm_svd = HammerSpammerRanking(
             beta=config['beta'],
             epsilon=config['epsilon']
         )
+        self.algorithm_ccrr = CCRRanking(
+            beta=config['beta'],
+            epsilon=config['epsilon'],
+            T=config.get('ccrr_iterations', 5)
+        )
+        print("  - SVD-based Hammer-Spammer")
+        print("  - CCRR (Cross-Consistency Robust Ranking)")
 
         # Initialize validator
         print(f"\nInitializing validator (oracle={config['oracle_model']})...")
@@ -120,12 +128,17 @@ class ExperimentRunner:
         answers = experiment_data['answers']
         answer_strings = [a['answer'] for a in answers]
 
-        # Apply Hammer-Spammer algorithm
+        # Apply algorithms
         if self.config['verbose']:
-            print("\nApplying Hammer-Spammer algorithm...")
+            print("\nApplying algorithms...")
 
-        algo_idx, quality_scores = self.algorithm.select_best(R, return_scores=True)
-        algo_answer = answer_strings[algo_idx]
+        # SVD-based Hammer-Spammer
+        svd_idx, svd_scores = self.algorithm_svd.select_best(R, return_scores=True)
+        svd_answer = answer_strings[svd_idx]
+
+        # CCRR
+        ccrr_idx, ccrr_scores, ccrr_weights = self.algorithm_ccrr.select_best(R, return_details=True)
+        ccrr_answer = answer_strings[ccrr_idx]
 
         # Apply baselines
         if self.config['verbose']:
@@ -136,12 +149,17 @@ class ExperimentRunner:
             comparison_matrix=R
         )
 
-        # Validate algorithm selection with ground truth
+        # Validate algorithms with ground truth
         if self.config['verbose']:
             print("Validating with ground truth...")
 
-        algo_validation = self.validator.validate_with_ground_truth(
-            selected_answer=algo_answer,
+        svd_validation = self.validator.validate_with_ground_truth(
+            selected_answer=svd_answer,
+            ground_truth=ground_truth
+        )
+
+        ccrr_validation = self.validator.validate_with_ground_truth(
+            selected_answer=ccrr_answer,
             ground_truth=ground_truth
         )
 
@@ -154,7 +172,7 @@ class ExperimentRunner:
                 ground_truth=ground_truth
             )
 
-        # Oracle validation (if enabled)
+        # Oracle validation (if enabled) - validate CCRR since it's the main algorithm
         oracle_validation = None
         if self.config['use_oracle']:
             if self.config['verbose']:
@@ -163,7 +181,7 @@ class ExperimentRunner:
             try:
                 oracle_validation = self.validator.validate_with_oracle(
                     question=question,
-                    selected_answer=algo_answer,
+                    selected_answer=ccrr_answer,
                     all_answers=answer_strings
                 )
             except Exception as e:
@@ -177,13 +195,21 @@ class ExperimentRunner:
             'ground_truth': ground_truth,
             'answers': answers,
             'comparison_matrix': R.tolist(),
-            'quality_scores': quality_scores.tolist(),
 
-            # Algorithm results
-            'algorithm_selected_idx': algo_idx,
-            'algorithm_answer': algo_answer,
-            'algorithm_correct': algo_validation['correct'],
-            'algorithm_validation': algo_validation,
+            # SVD Algorithm results
+            'svd_selected_idx': svd_idx,
+            'svd_answer': svd_answer,
+            'svd_correct': svd_validation['correct'],
+            'svd_validation': svd_validation,
+            'svd_scores': svd_scores.tolist(),
+
+            # CCRR Algorithm results
+            'ccrr_selected_idx': ccrr_idx,
+            'ccrr_answer': ccrr_answer,
+            'ccrr_correct': ccrr_validation['correct'],
+            'ccrr_validation': ccrr_validation,
+            'ccrr_scores': ccrr_scores.tolist(),
+            'ccrr_weights': ccrr_weights.tolist(),
 
             # Baseline results
             'baseline_selections': baseline_selections,
@@ -216,7 +242,8 @@ class ExperimentRunner:
 
                 # Print summary
                 print(f"\nResult:")
-                print(f"  Algorithm: {'✓' if result['algorithm_correct'] else '✗'} (Answer: {result['algorithm_answer']})")
+                print(f"  CCRR: {'✓' if result['ccrr_correct'] else '✗'} (Answer: {result['ccrr_answer']})")
+                print(f"  SVD: {'✓' if result['svd_correct'] else '✗'} (Answer: {result['svd_answer']})")
                 print(f"  Ground truth: {result['ground_truth']}")
 
                 for baseline, validation in result['baseline_validations'].items():
@@ -247,9 +274,13 @@ class ExperimentRunner:
 
         num_questions = len(self.results)
 
-        # Algorithm performance
-        algo_correct = sum(1 for r in self.results if r['algorithm_correct'])
-        algo_accuracy = algo_correct / num_questions * 100
+        # CCRR performance
+        ccrr_correct = sum(1 for r in self.results if r['ccrr_correct'])
+        ccrr_accuracy = ccrr_correct / num_questions * 100
+
+        # SVD performance
+        svd_correct = sum(1 for r in self.results if r['svd_correct'])
+        svd_accuracy = svd_correct / num_questions * 100
 
         # Baseline performance
         baseline_accuracies = {}
@@ -275,8 +306,10 @@ class ExperimentRunner:
 
         return {
             'num_questions': num_questions,
-            'algorithm_accuracy': algo_accuracy,
-            'algorithm_correct': algo_correct,
+            'ccrr_accuracy': ccrr_accuracy,
+            'ccrr_correct': ccrr_correct,
+            'svd_accuracy': svd_accuracy,
+            'svd_correct': svd_correct,
             'baseline_accuracies': baseline_accuracies,
             'oracle_stats': oracle_stats,
             'agent_stats': agent_stats,
@@ -300,7 +333,9 @@ class ExperimentRunner:
         print(f"ACCURACY RESULTS")
         print(f"{'='*60}\n")
 
-        print(f"Hammer-Spammer Algorithm: {stats['algorithm_accuracy']:.2f}% ({stats['algorithm_correct']}/{stats['num_questions']})")
+        print("Algorithms:")
+        print(f"  CCRR (Cross-Consistency): {stats['ccrr_accuracy']:.2f}% ({stats['ccrr_correct']}/{stats['num_questions']})")
+        print(f"  SVD (Hammer-Spammer):     {stats['svd_accuracy']:.2f}% ({stats['svd_correct']}/{stats['num_questions']})")
         print()
 
         # Sort baselines by accuracy

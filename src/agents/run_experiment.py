@@ -164,7 +164,6 @@ class ExperimentRunner:
         self.agent_system = AgentSystem(
             agent_configs=agent_configs,
             api_key=api_key,
-            mode="natural",  # Track B: all real LLM
             parallel_generation=config.get('parallel_generation', True),
             parallel_comparison=config.get('parallel_comparison', True),
         )

@@ -66,7 +66,8 @@ class AgentSystem:
 
         if self.parallel_generation:
             # Parallel execution for faster generation
-            with ThreadPoolExecutor(max_workers=min(5, self.N)) as executor:
+            # Reduced to 2 workers to avoid rate limiting
+            with ThreadPoolExecutor(max_workers=min(2, self.N)) as executor:
                 # Submit all tasks
                 future_to_idx = {
                     executor.submit(agent.generate_answer, question): i
@@ -148,7 +149,8 @@ class AgentSystem:
 
         if self.parallel_comparison:
             # Parallel execution
-            with ThreadPoolExecutor(max_workers=min(10, total_comparisons)) as executor:
+            # Reduced to 3 workers to avoid rate limiting
+            with ThreadPoolExecutor(max_workers=min(3, total_comparisons)) as executor:
                 # Submit all comparison tasks
                 futures = []
                 tasks = []

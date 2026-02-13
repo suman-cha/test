@@ -22,6 +22,7 @@ python -m src.agents.run_experiment \
     --num-questions 10 \
     --difficulty hard \
     --output-dir results/hard_test/math500_hard_${TIMESTAMP} \
+    --no-parallel-generation \
     --verbose
 
 echo ""

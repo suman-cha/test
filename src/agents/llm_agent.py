@@ -87,6 +87,9 @@ class LLMAgent:
                         self.total_tokens_used += tokens
                         self.total_calls += 1
 
+                    # Small delay to be gentle with API rate limits
+                    time.sleep(0.5)
+
                     return result
 
                 elif response.status_code == 429:  # Rate limit

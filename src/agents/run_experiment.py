@@ -36,7 +36,7 @@ from tqdm import tqdm
 # ── Local imports ──
 from .agent_config import AGENT_CONFIGS, print_agent_summary
 from .agent_system import AgentSystem
-from ..algorithm.ccrr import CCRR
+from ..algorithm.ccrr import CCRRanking
 from ..evaluation.baselines import Baselines
 from ..utils.dataset import compare_answers
 
@@ -186,7 +186,7 @@ class ExperimentRunner:
 
         # ── Step 3: Apply algorithms ──
         # CCRR Algorithm (our algorithm)
-        ccrr = CCRR(beta=5.0, epsilon=0.1)
+        ccrr = CCRRanking(beta=5.0, epsilon=0.1)
         ccrr_idx, ccrr_scores, ccrr_weights = ccrr.select_best(R, return_details=True)
 
         # Majority Voting (baseline)
@@ -330,7 +330,7 @@ class ExperimentRunner:
                     )
 
                     # Re-run algorithms on modified R
-                    ccrr_new = CCRR(beta=5.0, epsilon=0.1)
+                    ccrr_new = CCRRanking(beta=5.0, epsilon=0.1)
                     ccrr_idx_new = ccrr_new.select_best(R_new)
                     mv_idx_new = Baselines.majority_voting(answer_strings)
 

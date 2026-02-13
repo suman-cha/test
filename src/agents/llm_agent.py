@@ -18,7 +18,7 @@ class LLMAgent:
     """Unified interface for calling LLM models via OpenRouter API."""
 
     def __init__(self, model_id: str, name: str, api_key: str,
-                 temperature: float = 0.7, max_tokens: int = 500):
+                 temperature: float = 0.0, max_tokens: int = 500):
         """
         Initialize LLM agent.
 
@@ -26,7 +26,7 @@ class LLMAgent:
             model_id: OpenRouter model identifier (e.g., "openai/gpt-4o")
             name: Human-readable agent name
             api_key: OpenRouter API key
-            temperature: Sampling temperature (default 0.7)
+            temperature: Sampling temperature (default 0.0 for reproducibility)
             max_tokens: Maximum tokens in response (default 500)
         """
         self.model_id = model_id

@@ -183,7 +183,7 @@ REASONING: [your explanation]
             "model": self.oracle_model,
             "messages": messages,
             "max_tokens": 500,
-            "temperature": 0.3  # Lower temperature for more consistent evaluation
+            "temperature": 0.0  # Deterministic for reproducibility
         }
 
         response = requests.post(

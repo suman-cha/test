@@ -39,8 +39,8 @@ class DatasetLoader:
                 # GSM8K dataset
                 self.dataset = load_dataset('gsm8k', 'main', split=self.split)
             elif self.dataset_name == 'math' or self.dataset_name == 'math500':
-                # MATH dataset (hendrycks/math)
-                self.dataset = load_dataset('hendrycks/math', split=self.split)
+                # MATH dataset (lighteval/MATH)
+                self.dataset = load_dataset('lighteval/MATH', split=self.split)
             else:
                 raise ValueError(f"Unknown dataset: {self.dataset_name}")
 

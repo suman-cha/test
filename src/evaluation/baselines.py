@@ -109,25 +109,6 @@ class Baselines:
         return 0
 
     @staticmethod
-    def svd_baseline(comparison_matrix: np.ndarray) -> int:
-        """
-        SVD-based baseline using rank-1 approximation.
-
-        This is the original Hammer-Spammer algorithm that uses
-        SVD to extract quality scores from the comparison matrix.
-
-        Args:
-            comparison_matrix: N×N comparison matrix R
-
-        Returns:
-            Index with highest quality score
-        """
-        from ..algorithm.hammer_spammer import HammerSpammerRanking
-
-        algo = HammerSpammerRanking()
-        return algo.select_best(comparison_matrix)
-
-    @staticmethod
     def oracle_voting(answers: List[str], oracle_scores: List[float]) -> int:
         """
         Select answer with highest oracle score.
@@ -170,10 +151,6 @@ class Baselines:
         results['majority_voting'] = Baselines.majority_voting(answers)
         results['best_single_model'] = Baselines.best_single_model()
         results['random'] = Baselines.random_selection(N, seed=42)
-
-        # Algorithm baselines (require comparison matrix)
-        if comparison_matrix is not None:
-            results['svd'] = Baselines.svd_baseline(comparison_matrix)
 
         # Weighted baselines if weights provided
         if weights is not None:

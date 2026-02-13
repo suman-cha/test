@@ -51,7 +51,7 @@ AGENT_CONFIGS = [
         "description": "Qwen 2.5 72B - Chinese open-source"
     },
 
-    # === LOW-TIER MODELS (10) - Spammer Candidates (Ultra Cheap) ===
+    # === LOW-TIER MODELS (10) - Spammer Candidates (확실히 작동하는 모델만) ===
     {
         "model": "meta-llama/llama-3.1-8b-instruct",
         "name": "llama-31-8b",
@@ -77,22 +77,10 @@ AGENT_CONFIGS = [
         "description": "DeepSeek Chat - budget model"
     },
     {
-        "model": "mistralai/mistral-small-latest",
-        "name": "mistral-small",
-        "tier": "low",
-        "description": "Mistral Small - compact"
-    },
-    {
         "model": "meta-llama/llama-3-8b-instruct",
         "name": "llama-3-8b",
         "tier": "low",
         "description": "Llama 3 8B - lightweight"
-    },
-    {
-        "model": "google/gemma-7b-it",
-        "name": "gemma-7b",
-        "tier": "low",
-        "description": "Google Gemma 7B - small"
     },
     {
         "model": "meta-llama/llama-3.2-3b-instruct",
@@ -107,10 +95,22 @@ AGENT_CONFIGS = [
         "description": "Meta Llama 3.2 1B - minimal"
     },
     {
-        "model": "google/gemma-2b-it",
-        "name": "gemma-2b",
+        "model": "google/gemini-flash-1.5",
+        "name": "gemini-flash-15",
         "tier": "low",
-        "description": "Google Gemma 2B - very small"
+        "description": "Google Gemini Flash 1.5 - fast"
+    },
+    {
+        "model": "mistralai/mistral-nemo",
+        "name": "mistral-nemo",
+        "tier": "low",
+        "description": "Mistral Nemo - compact"
+    },
+    {
+        "model": "nousresearch/hermes-3-llama-3.1-8b",
+        "name": "hermes-8b",
+        "tier": "low",
+        "description": "Nous Hermes 8B - tuned"
     },
 ]
 

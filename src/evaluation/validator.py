@@ -75,7 +75,9 @@ class Validator:
         }
 
     def validate_with_oracle(self, question: str, selected_answer: str,
-                           all_answers: List[str], selected_idx: Optional[int] = None,
+                           all_answers: List[str],
+                           all_reasonings: Optional[List[str]] = None,
+                           selected_idx: Optional[int] = None,
                            max_retries: int = 3) -> Dict[str, Any]:
         """
         Use Oracle Model (GPT-4o) to evaluate quality.
@@ -88,7 +90,8 @@ class Validator:
         Args:
             question: The original question
             selected_answer: The answer selected by the algorithm
-            all_answers: All N answers from agents
+            all_answers: All N final answer strings
+            all_reasonings: Full reasoning/solution from each agent (for quality assessment)
             selected_idx: Index of the selected answer (avoids ambiguity with duplicates)
             max_retries: Maximum retry attempts
 
@@ -111,11 +114,17 @@ class Validator:
             except ValueError:
                 selected_idx = 0
 
-        # Format all answers for the oracle
-        answers_text = "\n\n".join([
-            f"Answer {i+1}: {ans}"
-            for i, ans in enumerate(all_answers)
-        ])
+        # Format answers with full reasoning if available
+        if all_reasonings:
+            answers_text = "\n\n".join([
+                f"Answer {i+1}:\nFinal Answer: {ans}\nReasoning: {reasoning}"
+                for i, (ans, reasoning) in enumerate(zip(all_answers, all_reasonings))
+            ])
+        else:
+            answers_text = "\n\n".join([
+                f"Answer {i+1}: {ans}"
+                for i, ans in enumerate(all_answers)
+            ])
 
         prompt = f"""You are an expert mathematics evaluator. Evaluate the answers to the following question.
 
@@ -126,7 +135,7 @@ Here are {len(all_answers)} different answers:
 {answers_text}
 
 Tasks:
-1. Grade Answer {selected_idx + 1} on a scale of 0-10 for correctness and quality.
+1. Grade Answer {selected_idx + 1} on a scale of 0-10 for correctness and quality of reasoning.
 2. Identify which answer is the BEST (most correct and well-reasoned).
 3. Provide brief reasoning for your evaluation.
 
@@ -247,6 +256,7 @@ REASONING: [your explanation]
         return text.strip()
 
     def evaluate_all_answers(self, question: str, all_answers: List[str],
+                            all_reasonings: Optional[List[str]] = None,
                             ground_truth: Optional[str] = None,
                             max_retries: int = 3) -> Dict[str, Any]:
         """
@@ -258,6 +268,7 @@ REASONING: [your explanation]
         Args:
             question: The original question
             all_answers: All N answers from agents
+            all_reasonings: Full reasoning/solution from each agent (for quality assessment)
             ground_truth: Optional ground truth answer
             max_retries: Maximum retry attempts
 
@@ -289,11 +300,17 @@ REASONING: [your explanation]
 
         self.oracle_calls += 1
 
-        # Format all answers
-        answers_text = "\n\n".join([
-            f"Answer {i+1}: {ans}"
-            for i, ans in enumerate(all_answers)
-        ])
+        # Format all answers with full reasoning if available
+        if all_reasonings:
+            answers_text = "\n\n".join([
+                f"Answer {i+1}:\nFinal Answer: {ans}\nReasoning: {reasoning}"
+                for i, (ans, reasoning) in enumerate(zip(all_answers, all_reasonings))
+            ])
+        else:
+            answers_text = "\n\n".join([
+                f"Answer {i+1}: {ans}"
+                for i, ans in enumerate(all_answers)
+            ])
 
         prompt = f"""You are an expert mathematics evaluator. Grade each answer to the following question.
 
@@ -304,7 +321,7 @@ Here are {len(all_answers)} different answers:
 {answers_text}
 
 Tasks:
-1. Grade EACH answer on a scale of 0-10 for correctness and quality.
+1. Grade EACH answer on a scale of 0-10 for correctness and quality of reasoning.
 2. Identify which answer is the BEST overall.
 
 Respond in the following format:

@@ -137,6 +137,7 @@ class ExperimentRunner:
         R = experiment_data['comparison_matrix']
         answers = experiment_data['answers']
         answer_strings = [a['answer'] for a in answers]
+        reasoning_strings = [a.get('reasoning', '') for a in answers]
 
         # Apply algorithms
         if self.config['verbose']:
@@ -202,6 +203,7 @@ class ExperimentRunner:
                     question=question,
                     selected_answer=ccrr_answer,
                     all_answers=answer_strings,
+                    all_reasonings=reasoning_strings,
                     selected_idx=ccrr_idx
                 )
             except Exception as e:
@@ -218,6 +220,7 @@ class ExperimentRunner:
                 agent_evaluation = self.validator.evaluate_all_answers(
                     question=question,
                     all_answers=answer_strings,
+                    all_reasonings=reasoning_strings,
                     ground_truth=ground_truth
                 )
             except Exception as e:

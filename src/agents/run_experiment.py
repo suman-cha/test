@@ -34,15 +34,11 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 
 # ── Local imports ──
-# Adjust path depending on your project structure
-sys.path.insert(0, str(Path(__file__).parent))
-
-from agent_config import AGENT_CONFIGS, print_agent_summary
-from agent_system import AgentSystem
-from spectral_ranking import (
-    spectral_ranking, majority_voting, random_selection,
-    best_single_agent, analyze_weights, _default_match
-)
+from .agent_config import AGENT_CONFIGS, print_agent_summary
+from .agent_system import AgentSystem
+from ..algorithm.ccrr import CCRR
+from ..evaluation.baselines import Baselines
+from ..utils.dataset import compare_answers
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -189,17 +185,18 @@ class ExperimentRunner:
         answer_strings = [a['answer'] for a in answers]
 
         # ── Step 3: Apply algorithms ──
-        # SVD Spectral Ranking (our algorithm)
-        svd_idx, svd_scores, svd_weights, svd_details = spectral_ranking(R, return_details=True)
+        # CCRR Algorithm (our algorithm)
+        ccrr = CCRR(beta=5.0, epsilon=0.1)
+        ccrr_idx, ccrr_scores, ccrr_weights = ccrr.select_best(R, return_details=True)
 
         # Majority Voting (baseline)
-        mv_idx, mv_scores = majority_voting(R)
+        mv_idx = Baselines.majority_voting(answer_strings)
 
         # Random Selection (baseline)
-        rand_idx = random_selection(len(answer_strings), seed=idx)
+        rand_idx = Baselines.random_selection(len(answer_strings), seed=idx)
 
         # ── Step 4: Validate against ground truth ──
-        svd_correct = check_correct(answer_strings[svd_idx], ground_truth)
+        ccrr_correct = check_correct(answer_strings[ccrr_idx], ground_truth)
         mv_correct = check_correct(answer_strings[mv_idx], ground_truth)
         rand_correct = check_correct(answer_strings[rand_idx], ground_truth)
 
@@ -208,17 +205,20 @@ class ExperimentRunner:
         num_correct_agents = sum(agent_correctness)
 
         # Oracle: best single agent (upper bound)
-        oracle_idx, oracle_status = best_single_agent(answer_strings, ground_truth)
-        oracle_correct = (oracle_status == "found")
+        oracle_idx = 0  # Best single model (first agent)
+        for i, ans in enumerate(answer_strings):
+            if check_correct(ans, ground_truth):
+                oracle_idx = i
+                break
+        oracle_correct = check_correct(answer_strings[oracle_idx], ground_truth)
 
         # ── Print result ──
         print(f"\n  Results:")
-        print(f"    SVD Spectral:    {'✓' if svd_correct else '✗'}  → {answer_strings[svd_idx]}")
+        print(f"    CCRR Algorithm:  {'✓' if ccrr_correct else '✗'}  → {answer_strings[ccrr_idx]}")
         print(f"    Majority Vote:   {'✓' if mv_correct else '✗'}  → {answer_strings[mv_idx]}")
         print(f"    Random:          {'✓' if rand_correct else '✗'}  → {answer_strings[rand_idx]}")
         print(f"    Oracle (upper):  {'✓' if oracle_correct else '✗'}")
         print(f"    Agents correct:  {num_correct_agents}/{len(answer_strings)}")
-        print(f"    Spectral gap:    {svd_details['spectral_gap']:.2f}")
 
         # ── Compile result ──
         return {
@@ -230,12 +230,11 @@ class ExperimentRunner:
             'comparison_matrix': R.tolist(),
 
             # Algorithm results
-            'svd_idx': svd_idx,
-            'svd_answer': answer_strings[svd_idx],
-            'svd_correct': svd_correct,
-            'svd_scores': svd_scores.tolist(),
-            'svd_weights': svd_weights.tolist(),
-            'svd_spectral_gap': svd_details['spectral_gap'],
+            'ccrr_idx': ccrr_idx,
+            'ccrr_answer': answer_strings[ccrr_idx],
+            'ccrr_correct': ccrr_correct,
+            'ccrr_scores': ccrr_scores.tolist(),
+            'ccrr_weights': ccrr_weights.tolist(),
 
             'mv_idx': mv_idx,
             'mv_answer': answer_strings[mv_idx],
@@ -313,11 +312,11 @@ class ExperimentRunner:
         track_a_results = {}
 
         for k in spammer_counts:
-            svd_accs = []
+            ccrr_accs = []
             mv_accs = []
 
             for trial in range(num_trials):
-                svd_correct_count = 0
+                ccrr_correct_count = 0
                 mv_correct_count = 0
 
                 for result in self.results:
@@ -331,28 +330,29 @@ class ExperimentRunner:
                     )
 
                     # Re-run algorithms on modified R
-                    svd_idx_new = spectral_ranking(R_new)
-                    mv_idx_new, _ = majority_voting(R_new)
+                    ccrr_new = CCRR(beta=5.0, epsilon=0.1)
+                    ccrr_idx_new = ccrr_new.select_best(R_new)
+                    mv_idx_new = Baselines.majority_voting(answer_strings)
 
-                    if check_correct(answer_strings[svd_idx_new], gt):
-                        svd_correct_count += 1
+                    if check_correct(answer_strings[ccrr_idx_new], gt):
+                        ccrr_correct_count += 1
                     if check_correct(answer_strings[mv_idx_new], gt):
                         mv_correct_count += 1
 
-                svd_acc = svd_correct_count / len(self.results) * 100
+                ccrr_acc = ccrr_correct_count / len(self.results) * 100
                 mv_acc = mv_correct_count / len(self.results) * 100
-                svd_accs.append(svd_acc)
+                ccrr_accs.append(ccrr_acc)
                 mv_accs.append(mv_acc)
 
             track_a_results[k] = {
-                'svd_mean': float(np.mean(svd_accs)),
-                'svd_std': float(np.std(svd_accs)),
+                'ccrr_mean': float(np.mean(ccrr_accs)),
+                'ccrr_std': float(np.std(ccrr_accs)),
                 'mv_mean': float(np.mean(mv_accs)),
                 'mv_std': float(np.std(mv_accs)),
             }
 
             print(f"\n  k={k} spammers:")
-            print(f"    SVD:  {np.mean(svd_accs):.1f}% ± {np.std(svd_accs):.1f}%")
+            print(f"    CCRR: {np.mean(ccrr_accs):.1f}% ± {np.std(ccrr_accs):.1f}%")
             print(f"    MV:   {np.mean(mv_accs):.1f}% ± {np.std(mv_accs):.1f}%")
 
         return track_a_results
@@ -369,7 +369,7 @@ class ExperimentRunner:
 
         n = len(self.results)
 
-        svd_acc = sum(r['svd_correct'] for r in self.results) / n * 100
+        ccrr_acc = sum(r['ccrr_correct'] for r in self.results) / n * 100
         mv_acc = sum(r['mv_correct'] for r in self.results) / n * 100
         rand_acc = sum(r['rand_correct'] for r in self.results) / n * 100
         oracle_acc = sum(r['oracle_correct'] for r in self.results) / n * 100
@@ -383,18 +383,18 @@ class ExperimentRunner:
 
         print(f"\n  {'Method':<25} {'Accuracy':>10}")
         print(f"  {'─'*36}")
-        print(f"  {'SVD Spectral (ours)':<25} {svd_acc:>9.1f}%")
+        print(f"  {'CCRR Algorithm (ours)':<25} {ccrr_acc:>9.1f}%")
         print(f"  {'Majority Voting':<25} {mv_acc:>9.1f}%")
         print(f"  {'Random Selection':<25} {rand_acc:>9.1f}%")
         print(f"  {'Oracle (upper bound)':<25} {oracle_acc:>9.1f}%")
 
-        # SVD weight analysis: do weights correlate with agent quality?
+        # CCRR weight analysis: do weights correlate with agent quality?
         print(f"\n{'═'*60}")
-        print(f"  SVD WEIGHT ANALYSIS (Agent Reliability Detection)")
+        print(f"  CCRR WEIGHT ANALYSIS (Agent Reliability Detection)")
         print(f"{'═'*60}")
 
         # Average weights across all questions, grouped by tier
-        all_weights = np.array([r['svd_weights'] for r in self.results])
+        all_weights = np.array([r['ccrr_weights'] for r in self.results])
         avg_weights = all_weights.mean(axis=0)
         tiers = self.results[0]['agent_tiers']
         names = self.results[0]['agent_names']
@@ -415,16 +415,16 @@ class ExperimentRunner:
         try:
             from scipy.stats import spearmanr
             corr, pval = spearmanr(avg_weights, agent_accs)
-            print(f"\n  Spearman(SVD weight, agent accuracy) = {corr:.3f} (p={pval:.3f})")
+            print(f"\n  Spearman(CCRR weight, agent accuracy) = {corr:.3f} (p={pval:.3f})")
             if corr > 0.3 and pval < 0.05:
-                print(f"  → SVD successfully identifies more reliable agents!")
+                print(f"  → CCRR successfully identifies more reliable agents!")
             elif pval >= 0.05:
                 print(f"  → Not statistically significant (need more questions)")
         except ImportError:
             print(f"\n  (Install scipy for correlation analysis)")
 
         # Print per-agent breakdown
-        print(f"\n  {'Agent':<22} {'Tier':<8} {'Accuracy':>8} {'SVD Wt':>8}")
+        print(f"\n  {'Agent':<22} {'Tier':<8} {'Accuracy':>8} {'CCRR Wt':>8}")
         print(f"  {'─'*48}")
         order = np.argsort(-avg_weights)
         for idx in order:
@@ -433,14 +433,14 @@ class ExperimentRunner:
         # Track A results
         if track_a_results:
             print(f"\n{'═'*60}")
-            print(f"  TRACK A: SVD vs MV under Spammer Injection")
+            print(f"  TRACK A: CCRR vs MV under Spammer Injection")
             print(f"{'═'*60}")
-            print(f"  {'Spammers':<12} {'SVD Acc':>12} {'MV Acc':>12} {'Δ (SVD-MV)':>12}")
+            print(f"  {'Spammers':<12} {'CCRR Acc':>12} {'MV Acc':>12} {'Δ (CCRR-MV)':>12}")
             print(f"  {'─'*50}")
             for k in sorted(track_a_results.keys()):
                 r = track_a_results[k]
-                delta = r['svd_mean'] - r['mv_mean']
-                print(f"  k={k:<8} {r['svd_mean']:>9.1f}%   {r['mv_mean']:>9.1f}%   {delta:>+9.1f}%")
+                delta = r['ccrr_mean'] - r['mv_mean']
+                print(f"  k={k:<8} {r['ccrr_mean']:>9.1f}%   {r['mv_mean']:>9.1f}%   {delta:>+9.1f}%")
 
         print()
 

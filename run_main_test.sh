@@ -26,12 +26,15 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 echo "Running MATH (${NUM_QUESTIONS} Level 4-5 hard questions)..."
 echo "  Using difficulty filter: hard (Level 4-5 only)"
+echo "  Track A: Testing spammer robustness (0, 3, 5, 7, 8 spammers)"
 python -m src.agents.run_experiment \
     --dataset math \
     --num-questions ${NUM_QUESTIONS} \
     --difficulty hard \
     --output-dir results/main_test/math_${TIMESTAMP} \
     --save-frequency 10 \
+    --track-a \
+    --spammer-counts 0,3,5,7,8 \
     --verbose
 
 echo ""
@@ -40,12 +43,15 @@ echo ""
 
 echo "Running GSM8K (${NUM_QUESTIONS} questions from hardest problems)..."
 echo "  Using start-index 900 (multi-step reasoning problems)"
+echo "  Track A: Testing spammer robustness (0, 3, 5, 7, 8 spammers)"
 python -m src.agents.run_experiment \
     --dataset gsm8k \
     --num-questions ${NUM_QUESTIONS} \
     --start-index 900 \
     --output-dir results/main_test/gsm8k_${TIMESTAMP} \
     --save-frequency 10 \
+    --track-a \
+    --spammer-counts 0,3,5,7,8 \
     --verbose
 
 echo ""

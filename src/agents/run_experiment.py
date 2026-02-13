@@ -408,10 +408,12 @@ class ExperimentRunner:
 
         for k in spammer_counts:
             ccrr_accs = []
+            spectral_accs = []
             mv_accs = []
 
             for trial in range(num_trials):
                 ccrr_correct_count = 0
+                spectral_correct_count = 0
                 mv_correct_count = 0
 
                 for result in self.results:
@@ -427,28 +429,39 @@ class ExperimentRunner:
                     # Re-run algorithms on modified R
                     ccrr_new = CCRRanking(beta=5.0, epsilon=0.1)
                     ccrr_idx_new = ccrr_new.select_best(R_new)
+
+                    spectral_new = SpectralRanking(beta=5.0)
+                    spectral_idx_new = spectral_new.select_best(R_new)
+
                     mv_idx_new = Baselines.majority_voting(answer_strings)
 
                     if check_correct(answer_strings[ccrr_idx_new], gt, self.api_key):
                         ccrr_correct_count += 1
+                    if check_correct(answer_strings[spectral_idx_new], gt, self.api_key):
+                        spectral_correct_count += 1
                     if check_correct(answer_strings[mv_idx_new], gt, self.api_key):
                         mv_correct_count += 1
 
                 ccrr_acc = ccrr_correct_count / len(self.results) * 100
+                spectral_acc = spectral_correct_count / len(self.results) * 100
                 mv_acc = mv_correct_count / len(self.results) * 100
                 ccrr_accs.append(ccrr_acc)
+                spectral_accs.append(spectral_acc)
                 mv_accs.append(mv_acc)
 
             track_a_results[k] = {
                 'ccrr_mean': float(np.mean(ccrr_accs)),
                 'ccrr_std': float(np.std(ccrr_accs)),
+                'spectral_mean': float(np.mean(spectral_accs)),
+                'spectral_std': float(np.std(spectral_accs)),
                 'mv_mean': float(np.mean(mv_accs)),
                 'mv_std': float(np.std(mv_accs)),
             }
 
-            print(f"\n  k={k} spammers:")
-            print(f"    CCRR: {np.mean(ccrr_accs):.1f}% ± {np.std(ccrr_accs):.1f}%")
-            print(f"    MV:   {np.mean(mv_accs):.1f}% ± {np.std(mv_accs):.1f}%")
+            print(f"\n  k={k} spammers (out of {self.config['num_agents']} agents):")
+            print(f"    CCRR:            {np.mean(ccrr_accs):.1f}% ± {np.std(ccrr_accs):.1f}%")
+            print(f"    Spectral:        {np.mean(spectral_accs):.1f}% ± {np.std(spectral_accs):.1f}%")
+            print(f"    Majority Vote:   {np.mean(mv_accs):.1f}% ± {np.std(mv_accs):.1f}%")
 
         return track_a_results
 
@@ -529,15 +542,19 @@ class ExperimentRunner:
 
         # Track A results
         if track_a_results:
-            print(f"\n{'═'*60}")
-            print(f"  TRACK A: CCRR vs MV under Spammer Injection")
-            print(f"{'═'*60}")
-            print(f"  {'Spammers':<12} {'CCRR Acc':>12} {'MV Acc':>12} {'Δ (CCRR-MV)':>12}")
-            print(f"  {'─'*50}")
+            print(f"\n{'═'*70}")
+            print(f"  TRACK A: Robustness to Spammer Injection")
+            print(f"{'═'*70}")
+            print(f"  {'Spammers':<10} {'CCRR':>10} {'Spectral':>10} {'MV':>10} {'Best Δ':>10}")
+            print(f"  {'─'*70}")
             for k in sorted(track_a_results.keys()):
                 r = track_a_results[k]
-                delta = r['ccrr_mean'] - r['mv_mean']
-                print(f"  k={k:<8} {r['ccrr_mean']:>9.1f}%   {r['mv_mean']:>9.1f}%   {delta:>+9.1f}%")
+                ccrr_delta = r['ccrr_mean'] - r['mv_mean']
+                spectral_delta = r['spectral_mean'] - r['mv_mean']
+                best_delta = max(ccrr_delta, spectral_delta)
+                print(f"  k={k:<8} {r['ccrr_mean']:>9.1f}% {r['spectral_mean']:>9.1f}% {r['mv_mean']:>9.1f}% {best_delta:>+9.1f}%")
+            print(f"\n  Note: 'Best Δ' shows max(CCRR-MV, Spectral-MV)")
+            print(f"  Positive values = SVD-based methods outperform Majority Voting")
 
         print()
 
@@ -609,8 +626,8 @@ def parse_args():
 
     parser.add_argument('--track-a', action='store_true',
                         help='Also run Track A (spammer injection) analysis')
-    parser.add_argument('--spammer-counts', type=str, default='0,2,4,6,8',
-                        help='Comma-separated spammer counts for Track A')
+    parser.add_argument('--spammer-counts', type=str, default='0,3,5,7,8',
+                        help='Comma-separated spammer counts for Track A (default: 0,3,5,7,8)')
     parser.add_argument('--track-a-trials', type=int, default=5,
                         help='Random trials per spammer count in Track A')
 

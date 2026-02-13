@@ -7,51 +7,94 @@ various models to create natural hammer-spammer dynamics.
 IMPORTANT: GPT-4o (openai/gpt-4o) is reserved as the Oracle model for
 validation and should NOT be included as an agent to avoid bias in
 correlation analysis.
+
+에이전트 구성 직관:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SVD가 작동하려면 E[R̃]에 의미 있는 low-rank 구조가 필요함.
+이를 위해 적어도 일부 에이전트의 row가 실제 품질 순서를 반영하는
+일관된 패턴을 가져야 함.
+
+- Strong 모델 2~3개가 있으면, 그 row들이 서로 비슷한 패턴을 공유하면서
+  SVD의 top singular vector를 지배함. 이게 "신호"임.
+- 약한 모델의 row는 노이즈로 처리됨.
+- 전부 약한 모델이면, 어떤 row도 일관된 패턴이 없어서 SVD가 잡을 신호가 없음.
+
+구성: 3 high-tier + 5 mid-tier + 7 low-tier = 15
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 from typing import List, Dict
 
-# N=15 agent configurations - COST OPTIMIZED
+# N=15 agent configurations
 # Distribution:
-# - 5 mid-tier models (Hammers) - 중간 성능 모델
-# - 10 low-tier models (Spammers 후보) - 초저렴 모델
+# - 3 high-tier models (Strong Hammers) — 핵심 신호원. 답변 정확도 + 비교 판단 모두 신뢰 가능
+# - 5 mid-tier models (Moderate Hammers) — noisy하지만 어느 정도 일관된 패턴 제공
+# - 7 low-tier models (Spammer 후보) — 초저렴 모델, 비교 판단이 거의 랜덤에 가까움
 #
 # Note: spammer는 --epsilon 또는 코드에서 인위적으로 지정
 
 AGENT_CONFIGS = [
-    # === MID-TIER MODELS (5) - Hammers (Decent Quality) ===
+    # === HIGH-TIER MODELS (3) - Strong Hammers (Core Signal) ===
+    # 이 모델들이 SVD의 top singular vector를 지배하는 "신호"를 만듦.
+    # 답변도 정확하고, 비교 판단도 신뢰할 수 있음.
+    # API 비용이 들지만 핵심 신호원이므로 반드시 필요.
     {
-        "model": "openai/gpt-3.5-turbo",
-        "name": "gpt35-turbo",
+        "model": "anthropic/claude-sonnet-4",
+        "name": "claude-sonnet",
+        "tier": "high",
+        "description": "Anthropic Claude Sonnet 4 - strong reasoning, reliable comparisons"
+    },
+    {
+        "model": "google/gemini-2.5-pro",
+        "name": "gemini-pro",
+        "tier": "high",
+        "description": "Google Gemini 2.5 Pro - strong math, accurate judgments"
+    },
+    {
+        "model": "openai/gpt-4-turbo",
+        "name": "gpt4-turbo",
+        "tier": "high",
+        "description": "OpenAI GPT-4 Turbo - near GPT-4o quality at lower cost"
+    },
+
+    # === MID-TIER MODELS (5) - Moderate Hammers (Noisy Signal) ===
+    # 비용 대비 효율이 좋음. 비교 판단이 noisy하지만 완전 랜덤은 아님.
+    # β가 낮은 hammer 역할 — SVD에서 중간 크기의 u₁ 가중치를 받음.
+    {
+        "model": "openai/gpt-4o-mini",
+        "name": "gpt4o-mini",
         "tier": "mid",
-        "description": "OpenAI GPT-3.5 Turbo - reliable performance"
+        "description": "OpenAI GPT-4o Mini - cost-efficient, decent quality"
     },
     {
         "model": "anthropic/claude-haiku-4.5",
         "name": "claude-haiku",
         "tier": "mid",
-        "description": "Anthropic Claude Haiku 4.5 - affordable quality"
+        "description": "Anthropic Claude Haiku 4.5 - fast and affordable"
     },
     {
         "model": "google/gemini-2.5-flash",
         "name": "gemini-flash",
         "tier": "mid",
-        "description": "Google Gemini 2.5 Flash - fast and cheap"
+        "description": "Google Gemini 2.5 Flash - fast, cheap, good for math"
     },
     {
-        "model": "meta-llama/llama-3.1-70b-instruct",
-        "name": "llama-31-70b",
+        "model": "openai/gpt-3.5-turbo",
+        "name": "gpt35-turbo",
         "tier": "mid",
-        "description": "Meta Llama 3.1 70B - open source"
+        "description": "OpenAI GPT-3.5 Turbo - baseline mid-tier performance"
     },
     {
         "model": "qwen/qwen-2.5-72b-instruct",
         "name": "qwen-72b",
         "tier": "mid",
-        "description": "Qwen 2.5 72B - Chinese open-source"
+        "description": "Qwen 2.5 72B - strong open-source alternative"
     },
 
-    # === LOW-TIER MODELS (10) - Spammer Candidates (테스트 통과 확인된 모델만!) ===
+    # === LOW-TIER MODELS (7) - Spammer Candidates (Noise) ===
+    # 비교 판단이 거의 랜덤에 가까움 → SVD에서 u₁ 가중치 ≈ 0.
+    # Majority voting에서는 이것들이 strong 모델의 신호를 희석시키지만,
+    # SVD 기반에서는 자동으로 무시됨 — 이게 알고리즘의 핵심 장점.
     {
         "model": "meta-llama/llama-3.1-8b-instruct",
         "name": "llama-31-8b-1",
@@ -66,51 +109,33 @@ AGENT_CONFIGS = [
     },
     {
         "model": "google/gemma-2-9b-it",
-        "name": "gemma-9b-1",
+        "name": "gemma-9b",
         "tier": "low",
-        "description": "Google Gemma 2 9B #1"
+        "description": "Google Gemma 2 9B"
     },
     {
         "model": "deepseek/deepseek-chat",
-        "name": "deepseek-1",
+        "name": "deepseek",
         "tier": "low",
-        "description": "DeepSeek Chat #1"
-    },
-    {
-        "model": "meta-llama/llama-3-8b-instruct",
-        "name": "llama-3-8b-1",
-        "tier": "low",
-        "description": "Llama 3 8B #1"
+        "description": "DeepSeek Chat"
     },
     {
         "model": "meta-llama/llama-3.2-3b-instruct",
-        "name": "llama-32-3b-1",
+        "name": "llama-32-3b",
         "tier": "low",
-        "description": "Meta Llama 3.2 3B #1"
+        "description": "Meta Llama 3.2 3B - small model"
     },
     {
         "model": "meta-llama/llama-3.2-1b-instruct",
-        "name": "llama-32-1b-1",
+        "name": "llama-32-1b",
         "tier": "low",
-        "description": "Meta Llama 3.2 1B #1"
+        "description": "Meta Llama 3.2 1B - smallest model"
     },
     {
-        "model": "meta-llama/llama-3.1-8b-instruct",
-        "name": "llama-31-8b-2",
+        "model": "meta-llama/llama-3-8b-instruct",
+        "name": "llama-3-8b",
         "tier": "low",
-        "description": "Meta Llama 3.1 8B #2"
-    },
-    {
-        "model": "mistralai/mistral-7b-instruct",
-        "name": "mistral-7b-2",
-        "tier": "low",
-        "description": "Mistral 7B #2"
-    },
-    {
-        "model": "google/gemma-2-9b-it",
-        "name": "gemma-9b-2",
-        "tier": "low",
-        "description": "Google Gemma 2 9B #2"
+        "description": "Llama 3 8B - older generation"
     },
 ]
 
@@ -164,9 +189,9 @@ def print_agent_summary():
     for tier in ['high', 'mid', 'low']:
         tier_agents = get_agents_by_tier(tier)
         tier_name = {
-            'high': 'HIGH-QUALITY (Strong Hammers)',
-            'mid': 'MID-TIER (Moderate Hammers)',
-            'low': 'LOWER-TIER (Potential Spammers)'
+            'high': 'HIGH-TIER (Strong Hammers) — Core Signal',
+            'mid': 'MID-TIER (Moderate Hammers) — Noisy Signal',
+            'low': 'LOW-TIER (Spammer Candidates) — Noise'
         }[tier]
 
         print(f"\n{tier_name}: {len(tier_agents)} agents")
@@ -200,17 +225,13 @@ assert len(PERSONA_CONFIGS) == 15, f"Expected 15 personas, got {len(PERSONA_CONF
 
 
 if __name__ == "__main__":
-    # Test agent configurations
     print_agent_summary()
-
-    print("\n\n=== Testing Agent Retrieval ===")
-    test_name = "gpt4-turbo"
-    config = get_agent_config(test_name)
-    print(f"\nRetrieved config for '{test_name}':")
-    print(f"  Model: {config['model']}")
-    print(f"  Tier: {config['tier']}")
-    print(f"  Description: {config['description']}")
 
     print("\n\n=== Agent Names ===")
     names = get_agent_names()
     print(f"All agent names: {', '.join(names)}")
+
+    print("\n\n=== Tier Distribution ===")
+    for tier in ['high', 'mid', 'low']:
+        agents = get_agents_by_tier(tier)
+        print(f"  {tier}: {len(agents)} agents")

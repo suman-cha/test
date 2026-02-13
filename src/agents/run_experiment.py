@@ -510,8 +510,8 @@ def parse_args():
 
     parser.add_argument('--num-questions', type=int, default=50,
                         help='Number of questions to run')
-    parser.add_argument('--num-agents', type=int, default=15,
-                        help='Number of agents (max 15)')
+    parser.add_argument('--num-agents', type=int, default=10,
+                        help='Number of agents (max 10)')
     parser.add_argument('--start-index', type=int, default=0,
                         help='Start index in dataset')
     parser.add_argument('--split', type=str, default='test',

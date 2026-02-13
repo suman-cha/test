@@ -1,25 +1,39 @@
 """
-Agent configuration for N=15 diverse LLM agents.
+Agent configuration for N=10 diverse LLM agents.
 
-This module defines the configurations for 15 different agents using
+This module defines the configurations for 10 different agents using
 various models to create natural hammer-spammer dynamics.
 
-IMPORTANT: GPT-4o (openai/gpt-4o) is reserved as the Oracle model for
-validation and should NOT be included as an agent to avoid bias in
-correlation analysis.
+Distribution:
+- 2 high-quality models (Strong Hammers)
+- 3 mid-tier models (Moderate Hammers)
+- 5 low-tier models (Potential Spammers)
 """
 
 from typing import List, Dict
 
-# N=15 agent configurations - COST OPTIMIZED
+# N=10 agent configurations
 # Distribution:
-# - 5 mid-tier models (Hammers) - 중간 성능 모델
-# - 10 low-tier models (Spammers 후보) - 초저렴 모델
-#
-# Note: spammer는 --epsilon 또는 코드에서 인위적으로 지정
+# - 2 high-quality models (Strong Hammers) - 최고 성능 모델
+# - 3 mid-tier models (Moderate Hammers) - 중간 성능 모델
+# - 5 low-tier models (Potential Spammers) - 저성능 모델
 
 AGENT_CONFIGS = [
-    # === MID-TIER MODELS (5) - Hammers (Decent Quality) ===
+    # === HIGH-QUALITY MODELS (2) - Strong Hammers ===
+    {
+        "model": "openai/gpt-4-turbo",
+        "name": "gpt4-turbo",
+        "tier": "high",
+        "description": "OpenAI GPT-4 Turbo - highest quality"
+    },
+    {
+        "model": "anthropic/claude-3.5-sonnet",
+        "name": "claude-sonnet",
+        "tier": "high",
+        "description": "Anthropic Claude 3.5 Sonnet - top tier reasoning"
+    },
+
+    # === MID-TIER MODELS (3) - Moderate Hammers ===
     {
         "model": "openai/gpt-3.5-turbo",
         "name": "gpt35-turbo",
@@ -36,86 +50,44 @@ AGENT_CONFIGS = [
         "model": "google/gemini-2.5-flash",
         "name": "gemini-flash",
         "tier": "mid",
-        "description": "Google Gemini 2.5 Flash - fast and cheap"
-    },
-    {
-        "model": "meta-llama/llama-3.1-70b-instruct",
-        "name": "llama-31-70b",
-        "tier": "mid",
-        "description": "Meta Llama 3.1 70B - open source"
-    },
-    {
-        "model": "qwen/qwen-2.5-72b-instruct",
-        "name": "qwen-72b",
-        "tier": "mid",
-        "description": "Qwen 2.5 72B - Chinese open-source"
+        "description": "Google Gemini 2.5 Flash - fast and balanced"
     },
 
-    # === LOW-TIER MODELS (10) - Spammer Candidates (테스트 통과 확인된 모델만!) ===
+    # === LOW-TIER MODELS (5) - Potential Spammers ===
     {
         "model": "meta-llama/llama-3.1-8b-instruct",
-        "name": "llama-31-8b-1",
+        "name": "llama-31-8b",
         "tier": "low",
-        "description": "Meta Llama 3.1 8B #1"
+        "description": "Meta Llama 3.1 8B"
     },
     {
         "model": "mistralai/mistral-7b-instruct",
-        "name": "mistral-7b-1",
+        "name": "mistral-7b",
         "tier": "low",
-        "description": "Mistral 7B #1"
+        "description": "Mistral 7B"
     },
     {
         "model": "google/gemma-2-9b-it",
-        "name": "gemma-9b-1",
+        "name": "gemma-9b",
         "tier": "low",
-        "description": "Google Gemma 2 9B #1"
-    },
-    {
-        "model": "deepseek/deepseek-chat",
-        "name": "deepseek-1",
-        "tier": "low",
-        "description": "DeepSeek Chat #1"
-    },
-    {
-        "model": "meta-llama/llama-3-8b-instruct",
-        "name": "llama-3-8b-1",
-        "tier": "low",
-        "description": "Llama 3 8B #1"
+        "description": "Google Gemma 2 9B"
     },
     {
         "model": "meta-llama/llama-3.2-3b-instruct",
-        "name": "llama-32-3b-1",
+        "name": "llama-32-3b",
         "tier": "low",
-        "description": "Meta Llama 3.2 3B #1"
+        "description": "Meta Llama 3.2 3B"
     },
     {
         "model": "meta-llama/llama-3.2-1b-instruct",
-        "name": "llama-32-1b-1",
+        "name": "llama-32-1b",
         "tier": "low",
-        "description": "Meta Llama 3.2 1B #1"
-    },
-    {
-        "model": "meta-llama/llama-3.1-8b-instruct",
-        "name": "llama-31-8b-2",
-        "tier": "low",
-        "description": "Meta Llama 3.1 8B #2"
-    },
-    {
-        "model": "mistralai/mistral-7b-instruct",
-        "name": "mistral-7b-2",
-        "tier": "low",
-        "description": "Mistral 7B #2"
-    },
-    {
-        "model": "google/gemma-2-9b-it",
-        "name": "gemma-9b-2",
-        "tier": "low",
-        "description": "Google Gemma 2 9B #2"
+        "description": "Meta Llama 3.2 1B"
     },
 ]
 
-# Verify we have exactly N=15 agents
-assert len(AGENT_CONFIGS) == 15, f"Expected 15 agents, got {len(AGENT_CONFIGS)}"
+# Verify we have exactly N=10 agents
+assert len(AGENT_CONFIGS) == 10, f"Expected 10 agents, got {len(AGENT_CONFIGS)}"
 
 
 def get_agent_config(name: str) -> Dict:
@@ -188,15 +160,10 @@ PERSONA_CONFIGS = [
     "You approach problems methodically using formal mathematical notation.",
     "You are a practical solver who tests answers with concrete examples.",
     "You are an experienced educator who explains reasoning clearly.",
-    "You are a competitive problem solver who seeks elegant solutions.",
-    "You are a systematic thinker who follows algorithmic approaches.",
-    "You are a visual thinker who uses diagrams and geometric reasoning.",
-    "You are a logical reasoner who builds proofs step-by-step.",
-    "You are a heuristic solver who uses estimation and approximation."
 ]
 
-# Verify we have exactly N=15 personas as backup
-assert len(PERSONA_CONFIGS) == 15, f"Expected 15 personas, got {len(PERSONA_CONFIGS)}"
+# Verify we have exactly N=10 personas as backup
+assert len(PERSONA_CONFIGS) == 10, f"Expected 10 personas, got {len(PERSONA_CONFIGS)}"
 
 
 if __name__ == "__main__":

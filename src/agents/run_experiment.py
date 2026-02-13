@@ -288,9 +288,12 @@ class ExperimentRunner:
 
                 # Print summary
                 print(f"\nResult:")
-                print(f"  CCRR: {'✓' if result['ccrr_correct'] else '✗'} (Answer: {result['ccrr_answer']})")
-                print(f"  SVD: {'✓' if result['svd_correct'] else '✗'} (Answer: {result['svd_answer']})")
-                print(f"  SWRA v2: {'✓' if result['swra_correct'] else '✗'} (Answer: {result['swra_answer']})")
+                print(f"  CCRR: {'✓' if result['ccrr_correct'] else '✗'}")
+                print(f"    Answer: {result['ccrr_answer']}")
+                print(f"  SVD: {'✓' if result['svd_correct'] else '✗'}")
+                print(f"    Answer: {result['svd_answer']}")
+                print(f"  SWRA v2: {'✓' if result['swra_correct'] else '✗'}")
+                print(f"    Answer: {result['swra_answer']}")
                 print(f"  Ground truth: {result['ground_truth']}")
 
                 for baseline, validation in result['baseline_validations'].items():

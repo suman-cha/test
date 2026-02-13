@@ -40,6 +40,7 @@ class AgentSystem:
 
         # Draw agent types: z_i ∈ {H, S} with P(z_i = S) = epsilon
         # 1 = hammer, 0 = spammer (fixed for all questions)
+        np.random.seed(42)  # Seed for reproducibility
         self.agent_types = (np.random.random(self.N) >= self.epsilon).astype(int)
         num_hammers = int(np.sum(self.agent_types))
         num_spammers = self.N - num_hammers

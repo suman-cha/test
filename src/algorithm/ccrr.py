@@ -1,33 +1,24 @@
 """
 CCRR (Cross-Consistency Robust Ranking) Algorithm.
 
-This module implements the CCRR algorithm as specified in CCRR_Algorithm_Spec.md.
-CCRR uses cross-consistency analysis and EM-based iterative refinement to identify
-hammers (high-quality agents) and spammers (low-quality agents), then selects the
-best answer.
+Implements the algorithm from the analysis report:
+  Phase 1: Row-norm spammer detection via agreement matrix G
+  Phase 2: EM refinement (Bradley-Terry MLE + type re-estimation)
+  Phase 3: Selection of best answer
 
-Algorithm Phases:
-1. Cross-Consistency Spammer Detection: Compute cross-consistency scores
-2. Weighted Score Estimation: Initial score estimation with weights
-3. Iterative Refinement: EM algorithm to refine weights and scores
-4. Final Selection: Select answer with highest score
+References:
+  - Karger, Oh, Shah (2011): Budget-optimal crowdsourcing
+  - Bradley & Terry (1952): Paired comparison model
 """
 
 import numpy as np
-from typing import Tuple, Dict, Any, Optional
+from scipy.optimize import minimize
+from typing import Tuple, Dict, Any
 
 
 def sigmoid(x: np.ndarray) -> np.ndarray:
-    """
-    Numerically stable sigmoid function.
-
-    Args:
-        x: Input array
-
-    Returns:
-        Sigmoid of x
-    """
-    x = np.asarray(x)
+    """Numerically stable sigmoid."""
+    x = np.asarray(x, dtype=float)
     pos = x >= 0
     result = np.empty_like(x, dtype=float)
     result[pos] = 1.0 / (1.0 + np.exp(-x[pos]))
@@ -37,16 +28,8 @@ def sigmoid(x: np.ndarray) -> np.ndarray:
 
 
 def log_sigmoid(x: np.ndarray) -> np.ndarray:
-    """
-    Numerically stable log-sigmoid function.
-
-    Args:
-        x: Input array
-
-    Returns:
-        Log of sigmoid of x
-    """
-    x = np.asarray(x)
+    """Numerically stable log-sigmoid: log(sigma(x))."""
+    x = np.asarray(x, dtype=float)
     result = np.empty_like(x, dtype=float)
     pos = x >= 0
     result[pos] = -np.log1p(np.exp(-x[pos]))
@@ -54,330 +37,379 @@ def log_sigmoid(x: np.ndarray) -> np.ndarray:
     return result
 
 
-def mad(arr: np.ndarray) -> float:
-    """
-    Median Absolute Deviation.
-
-    Args:
-        arr: Input array
-
-    Returns:
-        MAD of array
-    """
-    med = np.median(arr)
-    return np.median(np.abs(arr - med))
-
-
 class CCRRanking:
     """
     Cross-Consistency Robust Ranking algorithm.
 
-    This algorithm uses cross-consistency analysis to detect spammers
-    and EM-based iterative refinement to estimate agent quality scores.
+    Algorithm (from the analysis report):
+      Phase 1: Compute agreement matrix G = (1/(N-2)) * M @ M^T (M = R with zeroed diagonal).
+               Compute row-norm rho_i = sum_k G_ik^2.
+               Hammers have rho_i = Theta(N); spammers have rho_i = O(1).
+               Threshold to initialize hammer weights.
+      Phase 2: EM refinement alternating:
+               M-step: Bradley-Terry MLE for scores using current weights.
+               E-step: Update weights via likelihood ratio (hammer vs spammer).
+      Phase 3: Select i* = argmax_i s_hat_i.
     """
 
     def __init__(self, beta: float = 5.0, epsilon: float = 0.1, T: int = 5):
         """
-        Initialize CCRR algorithm.
-
         Args:
-            beta: Bradley-Terry discrimination parameter (default: 5.0)
-            epsilon: Prior probability of spammer (default: 0.1)
-            T: Number of iterative refinement rounds (default: 5)
+            beta: Bradley-Terry discrimination parameter (recommended: 3-5)
+            epsilon: Prior probability of being a spammer
+            T: Number of EM iterations
         """
         self.beta = beta
         self.epsilon = epsilon
         self.T = T
 
-        # Statistics (for diagnostics)
+        # Diagnostics
         self.last_weights = None
         self.last_scores = None
-        self.last_cross_consistency = None
+        self.last_rho = None
 
-    def select_best(self, R: np.ndarray, return_details: bool = False) -> int:
+    def select_best(self, R: np.ndarray, return_details: bool = False):
         """
-        Select the best answer from comparison matrix.
+        Select the best answer from comparison matrix R.
 
         Args:
-            R: Comparison matrix (N, N) with values in {-1, 1}
-            return_details: If True, return (index, scores, weights), else just index
+            R: Comparison matrix (N, N) with values in {-1, 1}, R_ii = 1.
+            return_details: If True, return (index, scores, weights).
 
         Returns:
-            Index of best answer (or tuple if return_details=True)
+            Best answer index (or tuple if return_details=True).
         """
-        best_idx, s_hat, w = self._ccrr(R)
-
+        best_idx, s_hat, w = self._run(R)
         if return_details:
             return best_idx, s_hat, w
-        else:
-            return best_idx
+        return best_idx
 
-    def _ccrr(self, R: np.ndarray) -> Tuple[int, np.ndarray, np.ndarray]:
-        """
-        Core CCRR algorithm implementation.
+    # ================================================================
+    # Core algorithm
+    # ================================================================
 
-        Args:
-            R: Comparison matrix (N, N)
-
-        Returns:
-            Tuple of (best_idx, scores, weights)
-        """
+    def _run(self, R: np.ndarray) -> Tuple[int, np.ndarray, np.ndarray]:
         N = R.shape[0]
+        assert R.shape == (N, N)
+        assert np.all(np.diag(R) == 1)
 
-        # Verify matrix properties
-        assert R.shape == (N, N), f"R must be square, got {R.shape}"
-        assert np.all(np.isin(R, [-1, 1])), "R must contain only ±1"
-        assert np.all(np.diag(R) == 1), "Diagonal must be all 1s"
+        # ---- Phase 1: Row-norm spammer detection ----
+        w = self._phase1_rownorm_detection(R, N)
 
-        # ===== Phase 1: Cross-Consistency Spammer Detection =====
-        # C[i] = sum_{j != i} R[i][j] * R[j][i]
-        cross = R * R.T  # element-wise product
-        C = np.sum(cross, axis=1) - np.diag(cross)  # subtract diagonal
+        # ---- Phase 2: EM refinement ----
+        s_hat = self._init_scores(R, w, N)
 
-        self.last_cross_consistency = C
-
-        C_med = np.median(C)
-        C_mad = mad(C)
-        if C_mad == 0:
-            C_mad = 1.0
-        gamma = 2.0 / C_mad
-
-        w = sigmoid(-gamma * (C - C_med))
-
-        # ===== Phase 2: Initial Weighted Score Estimation =====
-        # row_sum[i] = sum_{j != i} R[i][j]
-        row_sums = np.sum(R, axis=1) - 1.0  # subtract diagonal R[i][i] = 1
-
-        # col_sum[i] = sum_{j != i} w[j] * R[j][i]
-        col_sums = R.T @ w - w  # R.T @ w - w[i]*R[i][i]
-
-        s_hat = w * row_sums - col_sums
-
-        # Normalize
-        s_std = np.std(s_hat)
-        if s_std == 0:
-            s_std = 1.0
-        s_hat = (s_hat - np.mean(s_hat)) / s_std
-
-        # ===== Phase 3: Iterative Refinement =====
         for t in range(self.T):
+            # M-step: estimate scores via Bradley-Terry MLE
+            s_hat = self._bt_mle(R, w, s_hat, N)
 
-            # --- 3a. Update weights (E-step) ---
-            # Compute beta * (s_hat[i] - s_hat[j]) for all i, j
-            diff_matrix = self.beta * (s_hat[:, None] - s_hat[None, :])  # shape (N, N)
+            # E-step: update weights via likelihood ratio
+            w = self._update_weights(R, s_hat, N)
 
-            # log_sigmoid(R[i][j] * diff_matrix[i][j])
-            log_sig_values = log_sigmoid(R * diff_matrix)
-
-            # Sum over j != i (exclude diagonal)
-            np.fill_diagonal(log_sig_values, 0.0)
-            L_H = np.sum(log_sig_values, axis=1)
-
-            # Clamp L_H to avoid -inf issues
-            L_H = np.maximum(L_H, -500.0)
-
-            L_S = (N - 1) * np.log(0.5)
-
-            log_pH = np.log(1 - self.epsilon) + L_H
-            log_pS = np.log(self.epsilon) + L_S
-
-            # Numerically stable softmax
-            max_log = np.maximum(log_pH, log_pS)
-            w = np.exp(log_pH - max_log) / (np.exp(log_pH - max_log) + np.exp(log_pS - max_log))
-
-            # Handle NaN (if both log_pH and log_pS are -inf)
-            w = np.where(np.isnan(w), 0.5, w)
-
-            # --- 3b. Update scores (M-step) ---
-            row_sums = np.sum(R, axis=1) - 1.0
-            col_sums = R.T @ w - w
-            s_hat = w * row_sums - col_sums
-
-            # --- 3c. Normalize scores ---
-            s_std = np.std(s_hat)
-            if s_std == 0:
-                s_std = 1.0
-            s_hat = (s_hat - np.mean(s_hat)) / s_std
-
-        # ===== Phase 4: Selection =====
+        # ---- Phase 3: Selection ----
         best_idx = int(np.argmax(s_hat))
 
-        # Store for diagnostics
         self.last_scores = s_hat
         self.last_weights = w
 
         return best_idx, s_hat, w
 
+    # ================================================================
+    # Phase 1: Row-norm spammer detection
+    # ================================================================
+
+    def _phase1_rownorm_detection(self, R: np.ndarray, N: int) -> np.ndarray:
+        """
+        Compute agreement matrix G and row-norms rho_i.
+
+        G_ik = (1/(N-2)) * sum_{j != i, j != k} R_ij * R_kj
+             = (1/(N-2)) * [M @ M^T]_ik  (approximately, after zeroing i,k contributions)
+
+        For efficiency, compute G = (1/(N-2)) * M @ M^T, then zero diagonal.
+        Row-norm: rho_i = sum_{k != i} G_ik^2.
+
+        Hammers: rho_i = Theta(N).
+        Spammers: rho_i = O(1).
+        """
+        # M = R with zeroed diagonal
+        M = R.astype(float).copy()
+        np.fill_diagonal(M, 0.0)
+
+        # G = (1/(N-2)) * M @ M^T
+        G = M @ M.T / (N - 2)
+        np.fill_diagonal(G, 0.0)
+
+        # Row-norms
+        rho = np.sum(G ** 2, axis=1)
+        self.last_rho = rho
+
+        # Adaptive threshold: median / 2
+        # Hammers have rho = Theta(N), spammers have rho = O(1).
+        # If majority are hammers (epsilon < 0.5), median is among hammers,
+        # so median/2 separates well.
+        tau = np.median(rho) / 2.0
+
+        # Initialize weights: 1 for hammer, 0 for spammer
+        w = np.where(rho > tau, 1.0, 0.0)
+
+        return w
+
+    # ================================================================
+    # Phase 2: Bradley-Terry MLE (M-step)
+    # ================================================================
+
+    def _init_scores(self, R: np.ndarray, w: np.ndarray, N: int) -> np.ndarray:
+        """Initialize scores using weighted row sums."""
+        M = R.astype(float).copy()
+        np.fill_diagonal(M, 0.0)
+
+        # Weighted row sum: weight by agent reliability
+        row_sums = M @ w  # sum_j R_ij * w_j for each i
+        s_init = row_sums / (np.sum(w) + 1e-10)
+
+        return s_init
+
+    def _bt_mle(self, R: np.ndarray, w: np.ndarray, s_init: np.ndarray, N: int) -> np.ndarray:
+        """
+        Bradley-Terry MLE for score estimation.
+
+        Maximize:
+          L(s) = sum_i w_i * sum_{j != i} [
+              1(R_ij=1) * log sigma(beta*(s_i - s_j))
+            + 1(R_ij=-1) * log(1 - sigma(beta*(s_i - s_j)))
+          ]
+
+        subject to sum(s) = 0 (identifiability).
+        """
+        beta = self.beta
+
+        # Precompute indicators
+        M = R.astype(float).copy()
+        np.fill_diagonal(M, 0.0)
+        # R_plus[i,j] = 1 if R_ij = 1 and i != j, else 0
+        R_plus = ((M + 1) / 2).clip(0, 1)   # 1 where R_ij = 1
+        R_minus = ((1 - M) / 2).clip(0, 1)   # 1 where R_ij = -1
+
+        def neg_log_likelihood(s):
+            # Enforce sum = 0
+            s = s - np.mean(s)
+            diff = beta * (s[:, None] - s[None, :])  # (N, N)
+
+            log_sig_pos = log_sigmoid(diff)    # log sigma(beta(s_i - s_j))
+            log_sig_neg = log_sigmoid(-diff)   # log(1 - sigma(beta(s_i - s_j)))
+
+            # Weighted log-likelihood
+            ll_per_agent = np.sum(R_plus * log_sig_pos + R_minus * log_sig_neg, axis=1)
+            ll = np.sum(w * ll_per_agent)
+
+            return -ll
+
+        def neg_gradient(s):
+            s = s - np.mean(s)
+            diff = beta * (s[:, None] - s[None, :])
+            sig = sigmoid(diff)
+
+            # Gradient: d/ds_i of log-lik contribution from row i
+            # = beta * sum_j [R_plus_ij * (1 - sig_ij) - R_minus_ij * sig_ij]
+            # = beta * sum_j [R_plus_ij - sig_ij] (for j != i)
+            residual = R_plus - sig  # (N, N)
+            np.fill_diagonal(residual, 0.0)
+
+            # Row contribution (agent i as judge)
+            grad_row = beta * np.sum(residual, axis=1)
+
+            # Column contribution (agent i as subject being judged)
+            grad_col = -beta * np.sum((w[:, None] * residual), axis=0)
+
+            grad = w * grad_row + grad_col
+
+            # Project out mean (identifiability constraint)
+            grad = grad - np.mean(grad)
+
+            return -grad
+
+        # Optimize
+        result = minimize(
+            neg_log_likelihood,
+            s_init,
+            jac=neg_gradient,
+            method='L-BFGS-B',
+            options={'maxiter': 50, 'ftol': 1e-8}
+        )
+
+        s_hat = result.x
+        s_hat = s_hat - np.mean(s_hat)  # enforce identifiability
+
+        return s_hat
+
+    # ================================================================
+    # Phase 2: Weight update (E-step)
+    # ================================================================
+
+    def _update_weights(self, R: np.ndarray, s_hat: np.ndarray, N: int) -> np.ndarray:
+        """
+        E-step: compute P(z_i = H | R, s_hat) for each agent i.
+
+        L_i^H = prod_{j != i} sigma(beta*(s_i - s_j))^{1(R_ij=1)}
+                               * (1-sigma(...))^{1(R_ij=-1)}
+        L_i^S = 2^{-(N-1)}
+
+        w_i = (1-epsilon)*L_i^H / ((1-epsilon)*L_i^H + epsilon*L_i^S)
+        """
+        beta = self.beta
+        diff = beta * (s_hat[:, None] - s_hat[None, :])  # (N, N)
+
+        # log L_i^H = sum_{j != i} log sigma(R_ij * beta * (s_i - s_j))
+        M = R.astype(float).copy()
+        np.fill_diagonal(M, 0.0)
+
+        log_lik = log_sigmoid(M * diff)
+        np.fill_diagonal(log_lik, 0.0)
+        L_H_log = np.sum(log_lik, axis=1)  # (N,)
+
+        # log L_i^S = (N-1) * log(0.5)
+        L_S_log = (N - 1) * np.log(0.5)
+
+        # log posterior
+        log_pH = np.log(1.0 - self.epsilon) + L_H_log
+        log_pS = np.log(self.epsilon) + L_S_log
+
+        # Numerically stable softmax
+        max_log = np.maximum(log_pH, log_pS)
+        w = np.exp(log_pH - max_log) / (np.exp(log_pH - max_log) + np.exp(log_pS - max_log))
+
+        # Handle NaN
+        w = np.where(np.isnan(w), 0.5, w)
+
+        return w
+
+    # ================================================================
+    # Utilities
+    # ================================================================
+
     def rank_all_answers(self, R: np.ndarray) -> np.ndarray:
-        """
-        Rank all answers from best to worst.
+        """Return indices sorted by quality (best first)."""
+        _, s_hat, _ = self._run(R)
+        return np.argsort(s_hat)[::-1]
 
-        Args:
-            R: Comparison matrix (N, N)
-
-        Returns:
-            Indices sorted by quality (best first)
-        """
-        _, s_hat, _ = self._ccrr(R)
-        return np.argsort(s_hat)[::-1]  # Descending order
-
-    def identify_hammers_spammers(self, R: np.ndarray, threshold: float = 0.5) -> Dict[str, np.ndarray]:
-        """
-        Identify hammers (high-quality agents) and spammers (low-quality agents).
-
-        Args:
-            R: Comparison matrix (N, N)
-            threshold: Weight threshold for hammer classification (default: 0.5)
-
-        Returns:
-            Dictionary with:
-                - hammers: indices of high-quality agents (w >= threshold)
-                - spammers: indices of low-quality agents (w < threshold)
-                - weights: all hammer weights
-                - scores: all quality scores
-        """
-        _, s_hat, w = self._ccrr(R)
-
-        hammers = np.where(w >= threshold)[0]
-        spammers = np.where(w < threshold)[0]
-
+    def identify_hammers_spammers(self, R: np.ndarray, threshold: float = 0.5) -> Dict[str, Any]:
+        """Classify agents into hammers and spammers."""
+        _, s_hat, w = self._run(R)
         return {
-            'hammers': hammers,
-            'spammers': spammers,
+            'hammers': np.where(w >= threshold)[0],
+            'spammers': np.where(w < threshold)[0],
             'weights': w,
             'scores': s_hat,
-            'threshold': threshold
         }
 
     def get_diagnostics(self) -> Dict[str, Any]:
-        """
-        Get diagnostic information about the last computation.
-
-        Returns:
-            Dictionary with diagnostic information
-        """
+        """Return diagnostics from last run."""
         if self.last_scores is None:
             return {'error': 'No computation performed yet'}
-
-        N = len(self.last_scores)
-
         return {
-            'algorithm': 'CCRR',
-            'num_agents': N,
+            'algorithm': 'CCRR (Row-Norm + BT-MLE)',
+            'num_agents': len(self.last_scores),
             'beta': self.beta,
             'epsilon': self.epsilon,
             'iterations': self.T,
             'scores': self.last_scores.tolist(),
             'weights': self.last_weights.tolist(),
-            'cross_consistency': self.last_cross_consistency.tolist() if self.last_cross_consistency is not None else None,
+            'rho': self.last_rho.tolist() if self.last_rho is not None else None,
             'num_hammers': int(np.sum(self.last_weights >= 0.5)),
             'num_spammers': int(np.sum(self.last_weights < 0.5)),
-            'score_mean': float(np.mean(self.last_scores)),
-            'score_std': float(np.std(self.last_scores)),
-            'weight_mean': float(np.mean(self.last_weights)),
-            'weight_std': float(np.std(self.last_weights)),
         }
 
-    def print_diagnostics(self):
-        """Print diagnostic information."""
-        diag = self.get_diagnostics()
-
-        if 'error' in diag:
-            print(f"Error: {diag['error']}")
-            return
-
-        print(f"\n{'='*60}")
-        print(f"CCRR Algorithm Diagnostics")
-        print(f"{'='*60}\n")
-
-        print(f"Number of agents: {diag['num_agents']}")
-        print(f"Parameters: beta={diag['beta']}, epsilon={diag['epsilon']}, T={diag['iterations']}")
-
-        print(f"\nHammer/Spammer Classification:")
-        print(f"  Hammers: {diag['num_hammers']} (weight >= 0.5)")
-        print(f"  Spammers: {diag['num_spammers']} (weight < 0.5)")
-
-        print(f"\nWeights:")
-        print(f"  Mean: {diag['weight_mean']:.4f}")
-        print(f"  Std: {diag['weight_std']:.4f}")
-
-        print(f"\nScores:")
-        print(f"  Mean: {diag['score_mean']:.4f}")
-        print(f"  Std: {diag['score_std']:.4f}")
-
-        print(f"\nTop 5 agents by score:")
-        sorted_indices = np.argsort(self.last_scores)[::-1][:5]
-        for rank, idx in enumerate(sorted_indices, 1):
-            print(f"  {rank}. Agent {idx}: score={self.last_scores[idx]:.4f}, weight={self.last_weights[idx]:.4f}")
-
     def __repr__(self) -> str:
-        """String representation."""
         return f"CCRRanking(beta={self.beta}, epsilon={self.epsilon}, T={self.T})"
 
 
-if __name__ == "__main__":
-    # Test the CCRR algorithm
-    print("Testing CCRR Algorithm...")
+# ================================================================
+# Test
+# ================================================================
 
-    # Generate a simple test case
-    print("\n=== Generating Test Data ===")
-    N = 10
+if __name__ == "__main__":
+    print("Testing CCRR Algorithm (Row-Norm + BT-MLE)...")
+    print("=" * 60)
+
+    N = 15
     np.random.seed(42)
+    beta_true = 5.0
+    epsilon_true = 0.2  # 20% spammers
 
     # Generate true scores
     s_true = np.random.uniform(0, 1, size=N)
 
-    # Generate types (70% hammers, 30% spammers)
-    z = np.where(np.random.random(N) < 0.3, 'S', 'H')
+    # Generate types
+    z = np.array(['S' if np.random.random() < epsilon_true else 'H' for _ in range(N)])
 
     # Generate comparison matrix
     R = np.ones((N, N), dtype=int)
-    beta = 5.0
-
     for i in range(N):
         for j in range(N):
             if i == j:
                 continue
             if z[i] == 'H':
-                prob = 1.0 / (1.0 + np.exp(-beta * (s_true[i] - s_true[j])))
+                prob = 1.0 / (1.0 + np.exp(-beta_true * (s_true[i] - s_true[j])))
                 R[i, j] = 1 if np.random.random() < prob else -1
             else:
                 R[i, j] = 1 if np.random.random() < 0.5 else -1
 
-    print(f"Generated {N} agents")
-    print(f"True hammers: {np.sum(z == 'H')}, Spammers: {np.sum(z == 'S')}")
-    print(f"True best agent: {np.argmax(s_true)} (score: {s_true[np.argmax(s_true)]:.4f})")
+    true_best = np.argmax(s_true)
+    true_hammers = set(np.where(z == 'H')[0])
+    true_spammers = set(np.where(z == 'S')[0])
 
-    # Apply CCRR
-    print("\n=== Applying CCRR Algorithm ===")
+    print(f"N = {N}, epsilon = {epsilon_true}")
+    print(f"True hammers: {sorted(true_hammers)}")
+    print(f"True spammers: {sorted(true_spammers)}")
+    print(f"True best agent: {true_best} (score: {s_true[true_best]:.4f})")
+
+    # ---- CCRR ----
+    print(f"\n{'='*60}")
+    print("CCRR Algorithm")
+    print(f"{'='*60}")
     ccrr = CCRRanking(beta=5.0, epsilon=0.1, T=5)
-
     best_idx, scores, weights = ccrr.select_best(R, return_details=True)
 
-    print(f"\nCCRR selected: Agent {best_idx}")
-    print(f"  Estimated score: {scores[best_idx]:.4f}")
-    print(f"  Hammer weight: {weights[best_idx]:.4f}")
-    print(f"  True score: {s_true[best_idx]:.4f}")
-    print(f"  True type: {z[best_idx]}")
+    print(f"Selected: Agent {best_idx} (true score: {s_true[best_idx]:.4f})")
+    print(f"True best: Agent {true_best} (true score: {s_true[true_best]:.4f})")
+    print(f"Regret: {s_true[true_best] - s_true[best_idx]:.4f}")
 
-    # Classification
-    classification = ccrr.identify_hammers_spammers(R)
-    print(f"\n=== Hammer/Spammer Classification ===")
-    print(f"Detected hammers: {len(classification['hammers'])} (true: {np.sum(z == 'H')})")
-    print(f"Detected spammers: {len(classification['spammers'])} (true: {np.sum(z == 'S')})")
+    # Hammer/spammer detection
+    detected_hammers = set(np.where(weights >= 0.5)[0])
+    detected_spammers = set(np.where(weights < 0.5)[0])
+    print(f"\nDetected hammers: {sorted(detected_hammers)}")
+    print(f"Detected spammers: {sorted(detected_spammers)}")
+    print(f"Hammer precision: {len(detected_hammers & true_hammers) / max(len(detected_hammers), 1):.2%}")
+    print(f"Hammer recall: {len(detected_hammers & true_hammers) / max(len(true_hammers), 1):.2%}")
 
-    # Check accuracy
-    true_hammers = np.where(z == 'H')[0]
-    detected_hammers = classification['hammers']
-    precision = len(np.intersect1d(detected_hammers, true_hammers)) / len(detected_hammers) if len(detected_hammers) > 0 else 0
-    recall = len(np.intersect1d(detected_hammers, true_hammers)) / len(true_hammers) if len(true_hammers) > 0 else 0
+    # Row-norms
+    print(f"\nRow-norms (rho):")
+    rho = ccrr.last_rho
+    for i in range(N):
+        marker = "H" if z[i] == 'H' else "S"
+        det = "H" if weights[i] >= 0.5 else "S"
+        print(f"  Agent {i:2d} [{marker}→{det}]: rho={rho[i]:8.2f}, w={weights[i]:.4f}, s_hat={scores[i]:.4f}, s_true={s_true[i]:.4f}")
 
-    print(f"Precision: {precision:.2%}")
-    print(f"Recall: {recall:.2%}")
+    # Score correlation
+    corr = np.corrcoef(scores, s_true)[0, 1]
+    print(f"\nScore correlation (estimated vs true): {corr:.4f}")
 
-    # Diagnostics
-    ccrr.print_diagnostics()
+    # ---- Majority Voting Baseline ----
+    print(f"\n{'='*60}")
+    print("Majority Voting Baseline")
+    print(f"{'='*60}")
+    col_sums = np.sum(R, axis=0)  # how many agents rate answer j as worse
+    row_sums = np.sum(R, axis=1) - 1  # how many answers agent i rates as worse
+    # Simple: use row_sums as score proxy
+    mv_best = int(np.argmax(row_sums))
+    print(f"Selected: Agent {mv_best} (true score: {s_true[mv_best]:.4f})")
+    print(f"Regret: {s_true[true_best] - s_true[mv_best]:.4f}")
 
-    # Compare scores
-    print(f"\n=== Score Correlation ===")
-    print(f"Correlation with true scores: {np.corrcoef(scores, s_true)[0,1]:.4f}")
+    # ---- Summary ----
+    print(f"\n{'='*60}")
+    print("Summary")
+    print(f"{'='*60}")
+    print(f"CCRR regret:  {s_true[true_best] - s_true[best_idx]:.4f}")
+    print(f"MV regret:    {s_true[true_best] - s_true[mv_best]:.4f}")
+    print(f"CCRR selected correct best: {best_idx == true_best}")
+    print(f"MV selected correct best:   {mv_best == true_best}")

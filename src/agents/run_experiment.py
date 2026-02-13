@@ -137,12 +137,26 @@ class ExperimentRunner:
             raise ValueError("OPENROUTER_API_KEY not found. Set it in .env or environment.")
 
         # Load dataset
-        print(f"\nLoading dataset: GSM8K")
-        self.dataset = load_gsm8k(
-            num_questions=config['num_questions'],
+        from ..utils.dataset import DatasetLoader
+        dataset_name = config.get('dataset', 'gsm8k')
+        difficulty = config.get('difficulty', None)
+        print(f"\nLoading dataset: {dataset_name.upper()}")
+        if difficulty:
+            print(f"  Difficulty filter: {difficulty}")
+
+        loader = DatasetLoader(
+            dataset_name=dataset_name,
             split=config.get('split', 'test'),
+            max_samples=config['num_questions'],
+            difficulty_filter=difficulty,
             start_index=config.get('start_index', 0),
         )
+
+        # Convert to expected format
+        self.dataset = [
+            {'question': q, 'answer': a}
+            for q, a in loader.get_all_questions()
+        ]
 
         # Initialize agent system (Track B: natural mode)
         print_agent_summary()
@@ -500,9 +514,15 @@ def parse_args():
     parser.add_argument('--num-agents', type=int, default=15,
                         help='Number of agents (max 15)')
     parser.add_argument('--start-index', type=int, default=0,
-                        help='Start index in GSM8K dataset')
+                        help='Start index in dataset')
     parser.add_argument('--split', type=str, default='test',
                         choices=['train', 'test'])
+    parser.add_argument('--dataset', type=str, default='gsm8k',
+                        choices=['gsm8k', 'math'],
+                        help='Dataset to use (gsm8k or math)')
+    parser.add_argument('--difficulty', type=str, default=None,
+                        choices=['easy', 'medium', 'hard'],
+                        help='Difficulty filter for MATH dataset')
 
     parser.add_argument('--track-a', action='store_true',
                         help='Also run Track A (spammer injection) analysis')
@@ -535,6 +555,8 @@ def main():
         'num_agents': min(args.num_agents, len(AGENT_CONFIGS)),
         'start_index': args.start_index,
         'split': args.split,
+        'dataset': args.dataset,
+        'difficulty': args.difficulty,
         'parallel_generation': not args.no_parallel_gen,
         'parallel_comparison': not args.no_parallel_cmp,
         'output_dir': args.output_dir,

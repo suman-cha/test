@@ -1,28 +1,46 @@
 #!/bin/bash
-# Main Test Script - Challenging problems where CCRR outperforms Majority Voting
-# Tests on harder problems to demonstrate CCRR's advantage
+# Main Test Script - Spectral Ranking vs Majority Voting on Hard Problems
+#
+# 실험 스토리:
+#   3 strong hammers (Sonnet, Gemini Pro, GPT-4 Turbo)의 신호를
+#   SVD가 자동으로 포착하여 12개 약한 모델의 노이즈를 걸러내는 반면,
+#   Majority Voting은 신호가 노이즈에 희석된다.
+#
+# Algorithms tested: SVD Spectral Ranking, CCRR, SWRA vs Majority Voting
 # Default: 50 questions per dataset (adjust based on your budget)
 
 set -e
 
 echo "========================================"
-echo "Main Test: CCRR vs MV on Hard Problems"
+echo "Main Test: Spectral Ranking vs Baselines"
 echo "========================================"
 echo ""
-echo "Testing on challenging problems where:"
-echo "  - Majority Voting likely fails"
-echo "  - CCRR algorithm excels"
+echo "Agent configuration (N=15):"
+echo "  HIGH-TIER (3): Claude Sonnet, Gemini Pro, GPT-4 Turbo"
+echo "  MID-TIER  (5): GPT-4o-mini, Haiku, Flash, GPT-3.5, Qwen-72B"
+echo "  LOW-TIER  (7): Llama 8B/3B/1B, Mistral 7B, Gemma 9B, DeepSeek"
 echo ""
-echo "⚠️  This will consume API credits!"
-echo "   Adjust --num-questions based on your budget"
+echo "Algorithms: SVD Spectral, CCRR, SWRA vs Majority Voting"
+echo ""
+echo "Testing on challenging problems where:"
+echo "  - Strong hammers provide reliable signal for SVD"
+echo "  - Majority Voting gets diluted by weak model noise"
+echo ""
+echo "Warning: This will consume API credits!"
+echo "  Adjust --num-questions based on your budget"
 echo ""
 
 # Configurable parameters
 NUM_QUESTIONS=${1:-50}  # Default 50, override with first argument
+BETA=${2:-5.0}          # Bradley-Terry sharpness
+EPSILON=${3:-0.1}       # Spammer probability
 
 # Create results directory
 mkdir -p results/main_test
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+echo "Parameters: num_questions=${NUM_QUESTIONS}, beta=${BETA}, epsilon=${EPSILON}"
+echo ""
 
 echo "Running GSM8K (${NUM_QUESTIONS} questions from harder problems)..."
 echo "  Using start-index 800 (later problems are harder)"
@@ -30,6 +48,8 @@ python -m src.agents.run_experiment \
     --dataset gsm8k \
     --num-questions ${NUM_QUESTIONS} \
     --start-index 800 \
+    --beta ${BETA} \
+    --epsilon ${EPSILON} \
     --output-dir results/main_test/gsm8k_${TIMESTAMP} \
     --save-frequency 10 \
     --verbose
@@ -44,6 +64,8 @@ python -m src.agents.run_experiment \
     --dataset math \
     --num-questions ${NUM_QUESTIONS} \
     --difficulty hard \
+    --beta ${BETA} \
+    --epsilon ${EPSILON} \
     --output-dir results/main_test/math_${TIMESTAMP} \
     --save-frequency 10 \
     --verbose
@@ -57,8 +79,8 @@ echo "Results saved to:"
 echo "  - results/main_test/gsm8k_${TIMESTAMP}/ (hard GSM8K problems, index 800+)"
 echo "  - results/main_test/math_${TIMESTAMP}/ (MATH Level 4-5)"
 echo ""
-echo "To run with custom number of questions:"
-echo "  ./run_main_test.sh 100  # runs 100 questions per dataset"
-echo ""
-echo "These harder problems better demonstrate CCRR's advantage over Majority Voting."
+echo "To run with custom parameters:"
+echo "  ./run_main_test.sh <num_questions> <beta> <epsilon>"
+echo "  ./run_main_test.sh 100          # 100 questions, default beta/epsilon"
+echo "  ./run_main_test.sh 50 3.0 0.2   # 50 questions, beta=3.0, epsilon=0.2"
 echo ""

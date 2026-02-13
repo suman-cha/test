@@ -149,8 +149,8 @@ class AgentSystem:
 
         if self.parallel_comparison:
             # Parallel execution
-            # Reduced to 3 workers to avoid rate limiting
-            with ThreadPoolExecutor(max_workers=min(3, total_comparisons)) as executor:
+            # Comparisons are simpler than generation, so use more workers
+            with ThreadPoolExecutor(max_workers=min(8, total_comparisons)) as executor:
                 # Submit all comparison tasks
                 futures = []
                 tasks = []

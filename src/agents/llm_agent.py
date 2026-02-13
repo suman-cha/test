@@ -88,7 +88,8 @@ class LLMAgent:
                         self.total_calls += 1
 
                     # Small delay to be gentle with API rate limits
-                    time.sleep(0.5)
+                    # Reduced to 0.2s for faster comparisons
+                    time.sleep(0.2)
 
                     return result
 

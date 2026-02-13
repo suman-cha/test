@@ -51,66 +51,66 @@ AGENT_CONFIGS = [
         "description": "Qwen 2.5 72B - Chinese open-source"
     },
 
-    # === LOW-TIER MODELS (10) - Spammer Candidates (확실히 작동하는 모델만) ===
+    # === LOW-TIER MODELS (10) - Spammer Candidates (테스트 통과 확인된 모델만!) ===
     {
         "model": "meta-llama/llama-3.1-8b-instruct",
-        "name": "llama-31-8b",
+        "name": "llama-31-8b-1",
         "tier": "low",
-        "description": "Meta Llama 3.1 8B - tiny"
+        "description": "Meta Llama 3.1 8B #1"
     },
     {
         "model": "mistralai/mistral-7b-instruct",
-        "name": "mistral-7b",
+        "name": "mistral-7b-1",
         "tier": "low",
-        "description": "Mistral 7B - ultra affordable"
+        "description": "Mistral 7B #1"
     },
     {
         "model": "google/gemma-2-9b-it",
-        "name": "gemma-9b",
+        "name": "gemma-9b-1",
         "tier": "low",
-        "description": "Google Gemma 2 9B - open-source"
+        "description": "Google Gemma 2 9B #1"
     },
     {
         "model": "deepseek/deepseek-chat",
-        "name": "deepseek",
+        "name": "deepseek-1",
         "tier": "low",
-        "description": "DeepSeek Chat - budget model"
+        "description": "DeepSeek Chat #1"
     },
     {
         "model": "meta-llama/llama-3-8b-instruct",
-        "name": "llama-3-8b",
+        "name": "llama-3-8b-1",
         "tier": "low",
-        "description": "Llama 3 8B - lightweight"
+        "description": "Llama 3 8B #1"
     },
     {
         "model": "meta-llama/llama-3.2-3b-instruct",
-        "name": "llama-32-3b",
+        "name": "llama-32-3b-1",
         "tier": "low",
-        "description": "Meta Llama 3.2 3B - ultra small"
+        "description": "Meta Llama 3.2 3B #1"
     },
     {
         "model": "meta-llama/llama-3.2-1b-instruct",
-        "name": "llama-32-1b",
+        "name": "llama-32-1b-1",
         "tier": "low",
-        "description": "Meta Llama 3.2 1B - minimal"
+        "description": "Meta Llama 3.2 1B #1"
     },
     {
-        "model": "google/gemini-flash-1.5",
-        "name": "gemini-flash-15",
+        "model": "meta-llama/llama-3.1-8b-instruct",
+        "name": "llama-31-8b-2",
         "tier": "low",
-        "description": "Google Gemini Flash 1.5 - fast"
+        "description": "Meta Llama 3.1 8B #2"
     },
     {
-        "model": "mistralai/mistral-nemo",
-        "name": "mistral-nemo",
+        "model": "mistralai/mistral-7b-instruct",
+        "name": "mistral-7b-2",
         "tier": "low",
-        "description": "Mistral Nemo - compact"
+        "description": "Mistral 7B #2"
     },
     {
-        "model": "nousresearch/hermes-3-llama-3.1-8b",
-        "name": "hermes-8b",
+        "model": "google/gemma-2-9b-it",
+        "name": "gemma-9b-2",
         "tier": "low",
-        "description": "Nous Hermes 8B - tuned"
+        "description": "Google Gemma 2 9B #2"
     },
 ]
 

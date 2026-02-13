@@ -37,6 +37,7 @@ from tqdm import tqdm
 from .agent_config import AGENT_CONFIGS, print_agent_summary
 from .agent_system import AgentSystem
 from ..algorithm.ccrr import CCRRanking
+from ..algorithm.spectral_ranking import SpectralRanking
 from ..evaluation.baselines import Baselines
 from ..utils.dataset import compare_answers
 
@@ -198,9 +199,13 @@ class ExperimentRunner:
         answer_strings = [a['answer'] for a in answers]
 
         # ── Step 3: Apply algorithms ──
-        # CCRR Algorithm (our algorithm)
+        # CCRR Algorithm
         ccrr = CCRRanking(beta=5.0, epsilon=0.1)
         ccrr_idx, ccrr_scores, ccrr_weights = ccrr.select_best(R, return_details=True)
+
+        # Spectral Ranking Algorithm
+        spectral = SpectralRanking(beta=5.0)
+        spectral_idx, spectral_scores, spectral_weights, spectral_details = spectral.select_best(R, return_details=True)
 
         # Majority Voting (baseline)
         mv_idx = Baselines.majority_voting(answer_strings)
@@ -210,6 +215,7 @@ class ExperimentRunner:
 
         # ── Step 4: Validate against ground truth ──
         ccrr_correct = check_correct(answer_strings[ccrr_idx], ground_truth)
+        spectral_correct = check_correct(answer_strings[spectral_idx], ground_truth)
         mv_correct = check_correct(answer_strings[mv_idx], ground_truth)
         rand_correct = check_correct(answer_strings[rand_idx], ground_truth)
 
@@ -227,11 +233,12 @@ class ExperimentRunner:
 
         # ── Print result ──
         print(f"\n  Results:")
-        print(f"    CCRR Algorithm:  {'✓' if ccrr_correct else '✗'}  → {answer_strings[ccrr_idx]}")
-        print(f"    Majority Vote:   {'✓' if mv_correct else '✗'}  → {answer_strings[mv_idx]}")
-        print(f"    Random:          {'✓' if rand_correct else '✗'}  → {answer_strings[rand_idx]}")
-        print(f"    Oracle (upper):  {'✓' if oracle_correct else '✗'}")
-        print(f"    Agents correct:  {num_correct_agents}/{len(answer_strings)}")
+        print(f"    CCRR Algorithm:     {'✓' if ccrr_correct else '✗'}  → {answer_strings[ccrr_idx]}")
+        print(f"    Spectral Ranking:   {'✓' if spectral_correct else '✗'}  → {answer_strings[spectral_idx]}")
+        print(f"    Majority Vote:      {'✓' if mv_correct else '✗'}  → {answer_strings[mv_idx]}")
+        print(f"    Random:             {'✓' if rand_correct else '✗'}  → {answer_strings[rand_idx]}")
+        print(f"    Oracle (upper):     {'✓' if oracle_correct else '✗'}")
+        print(f"    Agents correct:     {num_correct_agents}/{len(answer_strings)}")
 
         # ── Compile result ──
         return {
@@ -248,6 +255,13 @@ class ExperimentRunner:
             'ccrr_correct': ccrr_correct,
             'ccrr_scores': ccrr_scores.tolist(),
             'ccrr_weights': ccrr_weights.tolist(),
+
+            'spectral_idx': spectral_idx,
+            'spectral_answer': answer_strings[spectral_idx],
+            'spectral_correct': spectral_correct,
+            'spectral_scores': spectral_scores.tolist(),
+            'spectral_weights': spectral_weights.tolist(),
+            'spectral_gap': spectral_details['spectral_gap'],
 
             'mv_idx': mv_idx,
             'mv_answer': answer_strings[mv_idx],
@@ -383,6 +397,7 @@ class ExperimentRunner:
         n = len(self.results)
 
         ccrr_acc = sum(r['ccrr_correct'] for r in self.results) / n * 100
+        spectral_acc = sum(r['spectral_correct'] for r in self.results) / n * 100
         mv_acc = sum(r['mv_correct'] for r in self.results) / n * 100
         rand_acc = sum(r['rand_correct'] for r in self.results) / n * 100
         oracle_acc = sum(r['oracle_correct'] for r in self.results) / n * 100
@@ -394,10 +409,11 @@ class ExperimentRunner:
         print(f"  Questions: {n},  Agents: {self.config['num_agents']}")
         print(f"  Avg agents with correct answer: {avg_correct:.1f}/{self.config['num_agents']}")
 
-        print(f"\n  {'Method':<25} {'Accuracy':>10}")
-        print(f"  {'─'*36}")
-        print(f"  {'CCRR Algorithm (ours)':<25} {ccrr_acc:>9.1f}%")
-        print(f"  {'Majority Voting':<25} {mv_acc:>9.1f}%")
+        print(f"\n  {'Method':<30} {'Accuracy':>10}")
+        print(f"  {'─'*41}")
+        print(f"  {'CCRR Algorithm':<30} {ccrr_acc:>9.1f}%")
+        print(f"  {'Spectral Ranking':<30} {spectral_acc:>9.1f}%")
+        print(f"  {'Majority Voting':<30} {mv_acc:>9.1f}%")
         print(f"  {'Random Selection':<25} {rand_acc:>9.1f}%")
         print(f"  {'Oracle (upper bound)':<25} {oracle_acc:>9.1f}%")
 

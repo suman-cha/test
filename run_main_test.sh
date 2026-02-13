@@ -24,20 +24,6 @@ NUM_QUESTIONS=${1:-50}  # Default 50, override with first argument
 mkdir -p results/main_test
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-echo "Running GSM8K (${NUM_QUESTIONS} questions from harder problems)..."
-echo "  Using start-index 800 (later problems are harder)"
-python -m src.agents.run_experiment \
-    --dataset gsm8k \
-    --num-questions ${NUM_QUESTIONS} \
-    --start-index 800 \
-    --output-dir results/main_test/gsm8k_${TIMESTAMP} \
-    --save-frequency 10 \
-    --verbose
-
-echo ""
-echo "========================================"
-echo ""
-
 echo "Running MATH (${NUM_QUESTIONS} Level 4-5 hard questions)..."
 echo "  Using difficulty filter: hard (Level 4-5 only)"
 python -m src.agents.run_experiment \
@@ -50,12 +36,26 @@ python -m src.agents.run_experiment \
 
 echo ""
 echo "========================================"
+echo ""
+
+echo "Running GSM8K (${NUM_QUESTIONS} questions from harder problems)..."
+echo "  Using start-index 800 (later problems are harder)"
+python -m src.agents.run_experiment \
+    --dataset gsm8k \
+    --num-questions ${NUM_QUESTIONS} \
+    --start-index 800 \
+    --output-dir results/main_test/gsm8k_${TIMESTAMP} \
+    --save-frequency 10 \
+    --verbose
+
+echo ""
+echo "========================================"
 echo "Main Test Complete!"
 echo "========================================"
 echo ""
 echo "Results saved to:"
-echo "  - results/main_test/gsm8k_${TIMESTAMP}/ (hard GSM8K problems, index 800+)"
 echo "  - results/main_test/math_${TIMESTAMP}/ (MATH Level 4-5)"
+echo "  - results/main_test/gsm8k_${TIMESTAMP}/ (hard GSM8K problems, index 800+)"
 echo ""
 echo "To run with custom number of questions:"
 echo "  ./run_main_test.sh 100  # runs 100 questions per dataset"

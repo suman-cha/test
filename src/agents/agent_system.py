@@ -7,7 +7,7 @@ pairwise comparisons to construct the comparison matrix R.
 
 import numpy as np
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 

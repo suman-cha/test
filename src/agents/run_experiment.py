@@ -429,27 +429,40 @@ class ExperimentRunner:
                 for result in self.results:
                     R_orig = np.array(result['comparison_matrix'])
                     gt = result['ground_truth']
-                    answer_strings = [a['answer'] for a in result['answers']]
+                    answer_strings_orig = [a['answer'] for a in result['answers']]
 
-                    # Inject k spammers
+                    # Inject k spammers into comparison matrix R
                     R_new, spammer_mask = self.agent_system.inject_artificial_spammers(
                         R_orig, k=k, seed=trial * 1000 + result['question_idx']
                     )
 
-                    # Re-run algorithms on modified R
+                    # Also corrupt the spammer agents' answers
+                    # This ensures MV is also affected by spammer injection
+                    answer_strings_new = answer_strings_orig.copy()
+                    spammer_indices = np.where(spammer_mask)[0]
+
+                    # For each spammer, replace their answer with a random different answer
+                    np.random.seed(trial * 1000 + result['question_idx'])
+                    for spammer_idx in spammer_indices:
+                        # Pick a random different answer from the pool (not their own)
+                        available_answers = [ans for i, ans in enumerate(answer_strings_orig) if i != spammer_idx]
+                        if available_answers:
+                            answer_strings_new[spammer_idx] = np.random.choice(available_answers)
+
+                    # Re-run algorithms on modified data
                     ccrr_new = CCRRanking(beta=5.0, epsilon=0.1)
                     ccrr_idx_new = ccrr_new.select_best(R_new)
 
                     spectral_new = SpectralRanking(beta=5.0)
                     spectral_idx_new = spectral_new.select_best(R_new)
 
-                    mv_idx_new = Baselines.majority_voting(answer_strings)
+                    mv_idx_new = Baselines.majority_voting(answer_strings_new)
 
-                    if check_correct(answer_strings[ccrr_idx_new], gt, self.api_key):
+                    if check_correct(answer_strings_new[ccrr_idx_new], gt, self.api_key):
                         ccrr_correct_count += 1
-                    if check_correct(answer_strings[spectral_idx_new], gt, self.api_key):
+                    if check_correct(answer_strings_new[spectral_idx_new], gt, self.api_key):
                         spectral_correct_count += 1
-                    if check_correct(answer_strings[mv_idx_new], gt, self.api_key):
+                    if check_correct(answer_strings_new[mv_idx_new], gt, self.api_key):
                         mv_correct_count += 1
 
                 ccrr_acc = ccrr_correct_count / len(self.results) * 100

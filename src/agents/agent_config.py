@@ -74,10 +74,10 @@ AGENT_CONFIGS = [
 
     # === LOWER-TIER MODELS (6) - Potential Spammers ===
     {
-        "model": "meta-llama/llama-3.2-90b-vision-instruct",
-        "name": "llama-32-90b",
+        "model": "meta-llama/llama-3.1-70b-instruct",
+        "name": "llama-31-70b",
         "tier": "low",
-        "description": "Meta Llama 3.2 90B - open source"
+        "description": "Meta Llama 3.1 70B - open source"
     },
     {
         "model": "microsoft/phi-4",
@@ -104,10 +104,10 @@ AGENT_CONFIGS = [
         "description": "DeepSeek Chat - reasoning specialist"
     },
     {
-        "model": "anthropic/claude-3-opus",
-        "name": "claude-3-opus",
+        "model": "anthropic/claude-3.5-sonnet",
+        "name": "claude-35-sonnet",
         "tier": "low",
-        "description": "Anthropic Claude 3 Opus - previous generation"
+        "description": "Anthropic Claude 3.5 Sonnet - efficient model"
     },
 ]
 

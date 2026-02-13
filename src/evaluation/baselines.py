@@ -95,12 +95,16 @@ class Baselines:
         return np.random.randint(0, N)
 
     @staticmethod
-    def first_answer() -> int:
+    def best_single_model() -> int:
         """
-        Trivial baseline - always select first answer.
+        Best single model baseline - always select the strongest model's answer.
+
+        Assumes the first agent (index 0) is the strongest model (e.g., GPT-4o).
+        This baseline tests whether using multiple models provides any benefit
+        over simply using the best available model.
 
         Returns:
-            Always returns 0
+            Always returns 0 (strongest model's answer)
         """
         return 0
 
@@ -124,38 +128,6 @@ class Baselines:
 
         return int(np.argmax(oracle_scores))
 
-    @staticmethod
-    def row_sum_baseline(comparison_matrix: np.ndarray) -> int:
-        """
-        Select answer with highest row sum in comparison matrix.
-
-        This is a simple baseline that just sums each agent's
-        self-assessment scores without SVD.
-
-        Args:
-            comparison_matrix: N×N comparison matrix R
-
-        Returns:
-            Index with highest row sum
-        """
-        row_sums = comparison_matrix.sum(axis=1)
-        return int(np.argmax(row_sums))
-
-    @staticmethod
-    def column_sum_baseline(comparison_matrix: np.ndarray) -> int:
-        """
-        Select answer with highest column sum.
-
-        This counts how many other agents prefer this answer.
-
-        Args:
-            comparison_matrix: N×N comparison matrix R
-
-        Returns:
-            Index with highest column sum
-        """
-        col_sums = comparison_matrix.sum(axis=0)
-        return int(np.argmax(col_sums))
 
     @staticmethod
     def apply_all_baselines(answers: List[str],
@@ -175,19 +147,14 @@ class Baselines:
         N = len(answers)
         results = {}
 
-        # Always available baselines
+        # Core baselines
         results['majority_voting'] = Baselines.majority_voting(answers)
+        results['best_single_model'] = Baselines.best_single_model()
         results['random'] = Baselines.random_selection(N, seed=42)
-        results['first_answer'] = Baselines.first_answer()
 
         # Weighted baselines if weights provided
         if weights is not None:
             results['weighted_majority'] = Baselines.weighted_majority_voting(answers, weights)
-
-        # Comparison matrix baselines
-        if comparison_matrix is not None:
-            results['row_sum'] = Baselines.row_sum_baseline(comparison_matrix)
-            results['column_sum'] = Baselines.column_sum_baseline(comparison_matrix)
 
         return results
 

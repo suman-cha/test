@@ -191,9 +191,34 @@ def normalize_answer(answer: str) -> str:
     return answer
 
 
+def extract_number(text: str) -> Optional[float]:
+    """
+    Extract the first number from a text string.
+
+    Args:
+        text: Text containing a number
+
+    Returns:
+        Extracted number as float, or None if no number found
+    """
+    # Try to find numbers in the text (including decimals and negatives)
+    matches = re.findall(r'-?\d+\.?\d*', text)
+    if matches:
+        try:
+            return float(matches[0])
+        except ValueError:
+            pass
+    return None
+
+
 def compare_answers(answer1: str, answer2: str) -> bool:
     """
     Compare two answers for equivalence.
+
+    This handles:
+    - Direct string comparison
+    - Numerical comparison (extracts numbers from text)
+    - Case insensitive matching
 
     Args:
         answer1: First answer
@@ -209,14 +234,22 @@ def compare_answers(answer1: str, answer2: str) -> bool:
     if norm1 == norm2:
         return True
 
-    # Try numerical comparison if both are numbers
+    # Try numerical comparison
+    # First, try direct conversion
     try:
         num1 = float(norm1)
         num2 = float(norm2)
-        # Use small epsilon for floating point comparison
         return abs(num1 - num2) < 1e-6
     except ValueError:
         pass
+
+    # If direct conversion fails, try extracting numbers from text
+    # e.g., "3 bolts" -> 3, "$50 dollars" -> 50
+    num1 = extract_number(norm1)
+    num2 = extract_number(norm2)
+
+    if num1 is not None and num2 is not None:
+        return abs(num1 - num2) < 1e-6
 
     return False
 
@@ -241,14 +274,19 @@ if __name__ == "__main__":
     batch = loader.get_batch(0, 2)
     print(f"Retrieved batch of {len(batch)} questions")
 
-    # Test answer normalization
-    print("\n=== Testing Answer Normalization ===")
+    # Test answer normalization and comparison
+    print("\n=== Testing Answer Comparison ===")
     test_answers = [
-        ("1,000", "1000"),
-        ("$50", "50"),
-        ("  42  ", "42"),
-        ("3.14159", "3.14159")
+        ("1,000", "1000", True),
+        ("$50", "50", True),
+        ("  42  ", "42", True),
+        ("3.14159", "3.14159", True),
+        ("3 bolts", "3", True),  # Number extraction
+        ("$70,000", "70000", True),  # Complex formatting
+        ("The answer is 42", "42", True),  # Number in text
+        ("yes", "no", False),  # Different strings
     ]
-    for a1, a2 in test_answers:
+    for a1, a2, expected in test_answers:
         result = compare_answers(a1, a2)
-        print(f"'{a1}' == '{a2}': {result}")
+        status = "✓" if result == expected else "✗"
+        print(f"{status} '{a1}' == '{a2}': {result} (expected {expected})")

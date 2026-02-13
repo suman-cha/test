@@ -392,7 +392,7 @@ class ExperimentRunner:
     # Track A: Post-hoc spammer injection
     # ─────────────────────────────────────────────────────────────
 
-    def run_track_a(self, spammer_counts: List[int], num_trials: int = 5):
+    def run_track_a(self, spammer_counts: List[int], num_trials: int = 5, verbose: bool = False):
         """
         Run Track A analysis on saved Track B results.
 
@@ -781,6 +781,7 @@ def main():
         track_a_results, track_a_detailed = runner.run_track_a(
             spammer_counts=spammer_counts,
             num_trials=args.track_a_trials,
+            verbose=args.verbose,
         )
     else:
         track_a_detailed = None

@@ -203,8 +203,8 @@ class Baselines:
 
         Args:
             answers: List of N answer strings
-            comparison_matrix: Optional N×N comparison matrix
-            weights: Optional agent weights
+            comparison_matrix: Optional N×N comparison matrix (unused)
+            weights: Optional agent weights (unused)
 
         Returns:
             Dictionary mapping baseline name to selected index
@@ -212,20 +212,9 @@ class Baselines:
         N = len(answers)
         results = {}
 
-        # Core baselines
-        results['majority_voting'] = Baselines.majority_voting(answers)
-        results['best_single_model'] = Baselines.best_single_model()
+        # Core baselines: Random and Majority Voting only
         results['random'] = Baselines.random_selection(N, seed=42)
-
-        # Matrix-based baselines (if comparison matrix provided)
-        if comparison_matrix is not None:
-            results['row_sum'] = Baselines.row_sum(comparison_matrix)
-            results['column_sum'] = Baselines.column_sum(comparison_matrix)
-            results['borda_count'] = Baselines.borda_count(comparison_matrix)
-
-        # Weighted baselines if weights provided
-        if weights is not None:
-            results['weighted_majority'] = Baselines.weighted_majority_voting(answers, weights)
+        results['majority_voting'] = Baselines.majority_voting(answers)
 
         return results
 

@@ -19,7 +19,9 @@ class AgentSystem:
 
     def __init__(self, agent_configs: List[Dict], api_key: str,
                  parallel_generation: bool = True,
-                 parallel_comparison: bool = True):
+                 parallel_comparison: bool = True,
+                 spammer_indices: List[int] = None,
+                 spammer_seed: int = 42):
         """
         Initialize agent system.
 
@@ -28,15 +30,25 @@ class AgentSystem:
             api_key: OpenRouter API key
             parallel_generation: Use parallel execution for answer generation
             parallel_comparison: Use parallel execution for comparisons
+            spammer_indices: List of agent indices to force as synthetic spammers.
+                           These agents will make purely random comparisons.
+                           E.g., [12, 13, 14] makes last 3 agents spammers.
+            spammer_seed: Random seed for spammer comparisons (for reproducibility)
         """
         self.agent_configs = agent_configs
         self.api_key = api_key
         self.N = len(agent_configs)
         self.parallel_generation = parallel_generation
         self.parallel_comparison = parallel_comparison
+        self.spammer_indices = set(spammer_indices or [])
+        self.spammer_seed = spammer_seed
+        self.spammer_rng = np.random.RandomState(spammer_seed)
 
         # Initialize agents
         print(f"Initializing {self.N} agents...")
+        if self.spammer_indices:
+            print(f"  WARNING: {len(self.spammer_indices)} agents will be FORCED as synthetic spammers: {sorted(self.spammer_indices)}")
+
         self.agents = []
         for config in agent_configs:
             agent = LLMAgent(
@@ -47,6 +59,9 @@ class AgentSystem:
             self.agents.append(agent)
 
         print(f"Agent system ready with {self.N} agents")
+        if self.spammer_indices:
+            spammer_names = [self.agents[i].name for i in sorted(self.spammer_indices)]
+            print(f"  Synthetic spammers: {', '.join(spammer_names)}")
 
     def generate_all_answers(self, question: str, verbose: bool = True) -> List[Dict[str, Any]]:
         """
@@ -173,7 +188,13 @@ class AgentSystem:
                     i, j = future_to_task[future]
                     try:
                         result = future.result()
-                        R[i, j] = result
+
+                        # Force spammer behavior: random comparison
+                        if i in self.spammer_indices:
+                            R[i, j] = self.spammer_rng.choice([-1, 1])
+                        else:
+                            R[i, j] = result
+
                         if verbose:
                             pbar.update(1)
                     except Exception as e:
@@ -195,11 +216,15 @@ class AgentSystem:
                 for j in range(self.N):
                     if i != j:  # Skip diagonal
                         try:
-                            R[i, j] = self.agents[i].compare_answers(
-                                question,
-                                answers[i]['answer'],
-                                answers[j]['answer']
-                            )
+                            # Force spammer behavior: random comparison
+                            if i in self.spammer_indices:
+                                R[i, j] = self.spammer_rng.choice([-1, 1])
+                            else:
+                                R[i, j] = self.agents[i].compare_answers(
+                                    question,
+                                    answers[i]['answer'],
+                                    answers[j]['answer']
+                                )
                         except Exception as e:
                             print(f"Error in comparison ({i}, {j}): {e}")
                             R[i, j] = 1  # Default: prefer own answer
@@ -219,6 +244,12 @@ class AgentSystem:
             print(f"Comparison matrix constructed: shape={R.shape}")
             print(f"  Positive comparisons: {np.sum(R == 1)} ({100*np.sum(R == 1)/R.size:.1f}%)")
             print(f"  Negative comparisons: {np.sum(R == -1)} ({100*np.sum(R == -1)/R.size:.1f}%)")
+
+            if self.spammer_indices:
+                # Report spammer statistics
+                num_spammers = len(self.spammer_indices)
+                spammer_ratio = num_spammers / self.N
+                print(f"  Synthetic spammers: {num_spammers}/{self.N} ({100*spammer_ratio:.1f}%)")
 
         return R
 

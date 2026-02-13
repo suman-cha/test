@@ -53,12 +53,6 @@ AGENT_CONFIGS = [
 
     # === LOW-TIER MODELS (10) - Spammer Candidates (Ultra Cheap) ===
     {
-        "model": "microsoft/phi-4",
-        "name": "phi-4",
-        "tier": "low",
-        "description": "Microsoft Phi-4 - small model"
-    },
-    {
         "model": "meta-llama/llama-3.1-8b-instruct",
         "name": "llama-31-8b",
         "tier": "low",
@@ -77,19 +71,13 @@ AGENT_CONFIGS = [
         "description": "Google Gemma 2 9B - open-source"
     },
     {
-        "model": "microsoft/phi-3-mini-128k-instruct",
-        "name": "phi-3-mini",
-        "tier": "low",
-        "description": "Microsoft Phi-3 Mini - very tiny"
-    },
-    {
         "model": "deepseek/deepseek-chat",
         "name": "deepseek",
         "tier": "low",
         "description": "DeepSeek Chat - budget model"
     },
     {
-        "model": "mistralai/mistral-small-2402",
+        "model": "mistralai/mistral-small-latest",
         "name": "mistral-small",
         "tier": "low",
         "description": "Mistral Small - compact"
@@ -107,10 +95,22 @@ AGENT_CONFIGS = [
         "description": "Google Gemma 7B - small"
     },
     {
-        "model": "microsoft/phi-2",
-        "name": "phi-2",
+        "model": "meta-llama/llama-3.2-3b-instruct",
+        "name": "llama-32-3b",
         "tier": "low",
-        "description": "Microsoft Phi-2 - minimal cost"
+        "description": "Meta Llama 3.2 3B - ultra small"
+    },
+    {
+        "model": "meta-llama/llama-3.2-1b-instruct",
+        "name": "llama-32-1b",
+        "tier": "low",
+        "description": "Meta Llama 3.2 1B - minimal"
+    },
+    {
+        "model": "google/gemma-2b-it",
+        "name": "gemma-2b",
+        "tier": "low",
+        "description": "Google Gemma 2B - very small"
     },
 ]
 

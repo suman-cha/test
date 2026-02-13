@@ -1,43 +1,77 @@
-# Hammer-Spammer Model for LLM Agent Ranking
+# 24h Hammer Spammer - LLM Agent Ranking
 
-## 24-Hour Coding Test
+Implementation and comparison of ranking algorithms for LLM agent systems.
 
-### Problem Statement
-Design an algorithm to recover the best answer from N LLM agents using pairwise comparisons, inspired by the Hammer-Spammer model and crowdsourcing algorithms.
+## Algorithms
 
-### Project Structure
-```
-24h_hammer_spammer/
-├── src/
-│   ├── algorithm/       # Problem 1: SVD-based ranking algorithm
-│   ├── agents/          # Problem 2: LLM agent system
-│   ├── evaluation/      # Evaluation and comparison
-│   └── utils/          # Utility functions
-├── data/               # Datasets (GSM8K, MATH500)
-├── results/            # Experiment results
-├── logs/               # Execution logs
-└── requirements.txt    # Dependencies
-```
+- **CCRR** (Cross-Consistency Robust Ranking) - EM-based algorithm with spammer detection
+- **SVD** (Singular Value Decomposition) - Matrix factorization approach
 
-### Quick Start
+## Quick Start
 
-1. **Setup Environment**
+### Installation
 ```bash
-python3 -m venv venv
-source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-2. **Run Algorithm Test (Problem 1)**
+### Running Experiments
+
+**Quick Test (10 questions per dataset):**
 ```bash
-python src/algorithm/test_svd.py
+./run_quick_test.sh
+```
+Tests both GSM8K and MATH datasets with 10 questions each (~5-10 min).
+
+**Main Test (adjustable budget):**
+```bash
+./run_main_test.sh          # 50 questions per dataset (default)
+./run_main_test.sh 100      # 100 questions per dataset
+```
+Process as many questions as your API limits and budget allow.
+
+**Single Dataset:**
+```bash
+python -m src.agents.run_experiment --dataset gsm8k --num-questions 10 --verbose
+python -m src.agents.run_experiment --dataset math --num-questions 10 --verbose
 ```
 
-3. **Run LLM Experiment (Problem 2)**
-```bash
-python src/agents/run_experiment.py
+## Methods Compared
+
+| Method | Type | Description |
+|--------|------|-------------|
+| **CCRR** | Algorithm | Cross-Consistency + EM (Primary) |
+| **SVD** | Algorithm | Rank-1 SVD (Comparison) |
+| **Majority Voting** | Baseline | Simple majority |
+| **Best Single Model** | Baseline | GPT-4o only |
+| **Random** | Baseline | Random selection |
+
+## Project Structure
+
+```
+24h_hammer_spammer/
+├── src/
+│   ├── algorithm/       # CCRR and SVD algorithms
+│   ├── agents/          # LLM agent system (N=15)
+│   ├── evaluation/      # Validation and baselines
+│   └── utils/           # Dataset loaders
+├── results/
+│   ├── quick_test/      # Quick validation results
+│   └── main_test/       # Full experiment results
+└── CCRR_Algorithm_Spec.md  # Algorithm specification
 ```
 
-### References
-- Karger et al. (2011) "Budget-optimal crowdsourcing using low-rank matrix approximations"
+## Configuration
 
+- **N = 15 agents**: GPT-4o, Claude, Gemini, Llama, etc.
+- **Datasets**: GSM8K (math word problems), MATH (competition math)
+- **Validation**: Ground truth + Oracle model (GPT-4o)
+
+## Results
+
+Results include:
+- Accuracy comparison across all methods
+- Per-agent statistics (API usage, tokens)
+- Oracle validation scores
+- Detailed per-question results (JSON)
+
+Results are saved with timestamps to `results/` directory.

@@ -33,6 +33,7 @@ from src.algorithm.ccrr import CCRRanking
 from src.algorithm.swra import SWRARanking
 from src.evaluation.validator import Validator
 from src.evaluation.baselines import Baselines
+from src.evaluation.comparison_analysis import print_comparison_report, generate_latex_table
 
 
 class ExperimentRunner:
@@ -509,8 +510,12 @@ class ExperimentRunner:
 
         return analysis
 
-    def print_summary(self):
-        """Print experiment summary."""
+    def print_summary(self, detailed: bool = True):
+        """Print experiment summary.
+
+        Args:
+            detailed: If True, print detailed comparison analysis
+        """
         stats = self.compute_summary_statistics()
 
         print(f"\n{'='*60}")
@@ -624,6 +629,32 @@ class ExperimentRunner:
 
         print(f"Total API calls: {total_calls:,}")
         print(f"Total tokens: {total_tokens:,}")
+
+        # Print detailed comparison analysis
+        if detailed and len(self.results) > 0:
+            # Prepare per-question correctness data
+            results_per_question = []
+            for result in self.results:
+                correctness = {
+                    'ccrr': result['ccrr_correct'],
+                    'svd': result['svd_correct'],
+                    'swra': result['swra_correct'],
+                }
+                # Add baseline correctness
+                for baseline_name, validation in result['baseline_validations'].items():
+                    correctness[baseline_name] = validation['correct']
+                results_per_question.append(correctness)
+
+            # Print enhanced comparison
+            print_comparison_report(stats, results_per_question)
+
+            # Generate LaTeX table
+            if self.config.get('generate_latex', False):
+                latex_table = generate_latex_table(stats)
+                print("\n" + "="*60)
+                print("LATEX TABLE")
+                print("="*60)
+                print(latex_table)
 
     def save_results(self, intermediate: bool = False):
         """

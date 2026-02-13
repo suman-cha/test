@@ -323,6 +323,43 @@ class AgentSystem:
         for agent in self.agents:
             print(f"{agent.name:<20} {agent.model_id:<35} {agent.total_calls:<8} {agent.total_tokens_used:<10,}")
 
+    def inject_artificial_spammers(self, R: np.ndarray, k: int, seed: int = None) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Inject k artificial spammers into comparison matrix R for Track A analysis.
+
+        This replaces k rows of R with random noise, simulating k spammer agents.
+        NO API CALLS - just matrix manipulation on already-collected data.
+
+        Args:
+            R: N×N comparison matrix from Track B
+            k: Number of spammers to inject (0 to N)
+            seed: Random seed for reproducibility
+
+        Returns:
+            (R_modified, spammer_mask):
+                - R_modified: N×N matrix with k rows replaced by random {-1, +1}
+                - spammer_mask: N-length boolean array (True = spammer)
+        """
+        if seed is not None:
+            np.random.seed(seed)
+
+        N = R.shape[0]
+        R_new = R.copy()
+
+        # Choose k agents randomly to be spammers
+        spammer_indices = np.random.choice(N, size=min(k, N), replace=False)
+        spammer_mask = np.zeros(N, dtype=bool)
+        spammer_mask[spammer_indices] = True
+
+        # Replace their rows with random comparisons
+        for i in spammer_indices:
+            # Random {-1, +1} for all comparisons
+            R_new[i, :] = np.random.choice([-1, 1], size=N)
+            # Diagonal stays 1 (self-comparison)
+            R_new[i, i] = 1
+
+        return R_new, spammer_mask
+
 
 if __name__ == "__main__":
     # Test the agent system

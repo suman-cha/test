@@ -138,11 +138,14 @@ class LLMAgent:
                 - agent_name: str
                 - model_id: str
         """
-        prompt = f"""Solve the following math problem. Show your reasoning and provide a clear final answer.
+        prompt = f"""Solve the following math problem step-by-step.
 
 Question: {question}
 
-Please solve this step-by-step and clearly state your final answer at the end using the format "Final Answer: [your answer]"."""
+IMPORTANT: After showing your work, you MUST end your response with a line in EXACTLY this format:
+Final Answer: [your answer here]
+
+The final answer should be concise (a number, expression, or short phrase), not a full explanation."""
 
         messages = [
             {"role": "user", "content": prompt}
@@ -180,9 +183,9 @@ Please solve this step-by-step and clearly state your final answer at the end us
         Looks for patterns like:
         - "Final Answer: X"
         - "Answer: X"
-        - "Therefore, X"
         - \boxed{X}
-        - Last number in the text
+        - "Therefore, X"
+        - Last substantial line
 
         Args:
             response_text: Full response from LLM
@@ -190,43 +193,77 @@ Please solve this step-by-step and clearly state your final answer at the end us
         Returns:
             Extracted final answer
         """
-        # Try pattern: "Final Answer: ..." (capture until end of line or period)
-        match = re.search(r'Final Answer:\s*(.+?)(?:\.|$)', response_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            answer = match.group(1).strip()
-            # Take only first line if multi-line
-            return answer.split('\n')[0].strip()
+        # Try pattern: "Final Answer: ..." (most explicit)
+        # Look for this pattern, preferring the LAST occurrence
+        matches = list(re.finditer(r'Final Answer:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE))
+        if matches:
+            answer = matches[-1].group(1).strip()
+            # Remove trailing periods
+            answer = answer.rstrip('.')
+            # If it starts with LaTeX delimiters, clean them
+            answer = re.sub(r'^\$+|\$+$', '', answer).strip()
+            if answer:
+                return answer
 
-        # Try pattern: "Answer: ..."
-        match = re.search(r'(?:^|\n)Answer:\s*(.+?)(?:\.|$)', response_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            answer = match.group(1).strip()
-            return answer.split('\n')[0].strip()
+        # Try LaTeX \boxed{...} (common in math problems)
+        matches = list(re.finditer(r'\\boxed\{([^}]+)\}', response_text))
+        if matches:
+            return matches[-1].group(1).strip()
 
-        # Try LaTeX \boxed{...}
-        match = re.search(r'\\boxed\{([^}]+)\}', response_text)
-        if match:
-            return match.group(1).strip()
+        # Try pattern: "Answer: ..." (look for last occurrence)
+        matches = list(re.finditer(r'(?:^|\n)Answer:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE))
+        if matches:
+            answer = matches[-1].group(1).strip().rstrip('.')
+            answer = re.sub(r'^\$+|\$+$', '', answer).strip()
+            if answer:
+                return answer
 
         # Try pattern: "Therefore, ..."
-        match = re.search(r'Therefore,?\s+(.+?)(?:\.|$)', response_text, re.IGNORECASE)
-        if match:
-            answer = match.group(1).strip()
-            return answer.split('\n')[0].strip()
+        matches = list(re.finditer(r'Therefore,?\s+(?:the answer is\s+)?(.+?)(?:\.|$)', response_text, re.IGNORECASE))
+        if matches:
+            answer = matches[-1].group(1).strip()
+            answer = re.sub(r'^\$+|\$+$', '', answer).strip()
+            if answer:
+                return answer
 
-        # Try to find the last non-markdown line (skip lines starting with #)
-        lines = [line.strip() for line in response_text.split('\n')
-                if line.strip() and not line.strip().startswith('#')]
-        if lines:
-            # Return last non-empty, non-markdown line
-            return lines[-1]
+        # Try to find the last substantial line
+        # Ignore lines that are clearly not answers (like "Here is", "Step", etc.)
+        lines = [line.strip() for line in response_text.split('\n') if line.strip()]
 
-        # Try to find the last number in the text
-        numbers = re.findall(r'-?\d+\.?\d*', response_text)
-        if numbers:
-            return numbers[-1]
+        # Filter out lines that start with common non-answer phrases
+        non_answer_patterns = [
+            r'^(Here|Let|Step|First|Second|Third|Next|Now|So|Thus|We|To|The problem|The question)',
+            r'^#+\s',  # Markdown headers
+            r'^\d+\.',  # Numbered lists
+            r'^-\s',    # Bullet points
+        ]
 
-        return response_text.strip()
+        filtered_lines = []
+        for line in reversed(lines):  # Start from end
+            # Skip if matches non-answer pattern
+            if any(re.match(pattern, line, re.IGNORECASE) for pattern in non_answer_patterns):
+                continue
+            # Skip if line is too long (likely explanation)
+            if len(line) > 200:
+                continue
+            filtered_lines.append(line)
+            if len(filtered_lines) >= 3:  # Keep last 3 candidates
+                break
+
+        if filtered_lines:
+            # Return the first candidate (last substantial line)
+            answer = filtered_lines[0]
+            # Clean LaTeX delimiters
+            answer = re.sub(r'^\$+|\$+$', '', answer).strip()
+            answer = re.sub(r'^\\\[|\\\]$', '', answer).strip()
+            if answer:
+                return answer
+
+        # Last resort: return full text (truncated if too long)
+        result = response_text.strip()
+        if len(result) > 300:
+            result = result[:300] + "..."
+        return result
 
     def compare_answers(self, question: str, my_answer: str, other_answer: str) -> int:
         """

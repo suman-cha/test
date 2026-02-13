@@ -181,6 +181,7 @@ Please solve this step-by-step and clearly state your final answer at the end us
         - "Final Answer: X"
         - "Answer: X"
         - "Therefore, X"
+        - \boxed{X}
         - Last number in the text
 
         Args:
@@ -189,30 +190,41 @@ Please solve this step-by-step and clearly state your final answer at the end us
         Returns:
             Extracted final answer
         """
-        # Try pattern: "Final Answer: ..."
-        match = re.search(r'Final Answer:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
+        # Try pattern: "Final Answer: ..." (capture until end of line or period)
+        match = re.search(r'Final Answer:\s*(.+?)(?:\.|$)', response_text, re.IGNORECASE | re.DOTALL)
         if match:
-            return match.group(1).strip()
+            answer = match.group(1).strip()
+            # Take only first line if multi-line
+            return answer.split('\n')[0].strip()
 
         # Try pattern: "Answer: ..."
-        match = re.search(r'(?:^|\n)Answer:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
+        match = re.search(r'(?:^|\n)Answer:\s*(.+?)(?:\.|$)', response_text, re.IGNORECASE | re.DOTALL)
+        if match:
+            answer = match.group(1).strip()
+            return answer.split('\n')[0].strip()
+
+        # Try LaTeX \boxed{...}
+        match = re.search(r'\\boxed\{([^}]+)\}', response_text)
         if match:
             return match.group(1).strip()
 
         # Try pattern: "Therefore, ..."
-        match = re.search(r'Therefore,?\s+(.+?)(?:\n|$)', response_text, re.IGNORECASE)
+        match = re.search(r'Therefore,?\s+(.+?)(?:\.|$)', response_text, re.IGNORECASE)
         if match:
-            return match.group(1).strip()
+            answer = match.group(1).strip()
+            return answer.split('\n')[0].strip()
+
+        # Try to find the last non-markdown line (skip lines starting with #)
+        lines = [line.strip() for line in response_text.split('\n')
+                if line.strip() and not line.strip().startswith('#')]
+        if lines:
+            # Return last non-empty, non-markdown line
+            return lines[-1]
 
         # Try to find the last number in the text
         numbers = re.findall(r'-?\d+\.?\d*', response_text)
         if numbers:
             return numbers[-1]
-
-        # Fallback: return last line
-        lines = [line.strip() for line in response_text.split('\n') if line.strip()]
-        if lines:
-            return lines[-1]
 
         return response_text.strip()
 

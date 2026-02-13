@@ -230,6 +230,8 @@ def normalize_answer(answer: str) -> str:
     - Removing whitespace
     - Converting to lowercase
     - Removing common formatting (commas, dollar signs, etc.)
+    - Removing trailing punctuation
+    - Removing LaTeX formatting
 
     Args:
         answer: Raw answer string
@@ -240,15 +242,24 @@ def normalize_answer(answer: str) -> str:
     # Convert to lowercase
     answer = answer.lower().strip()
 
+    # Remove LaTeX \boxed{} if present
+    boxed_match = re.search(r'\\boxed\{([^}]+)\}', answer)
+    if boxed_match:
+        answer = boxed_match.group(1)
+
     # Remove common formatting characters
     answer = answer.replace(',', '')  # Remove commas from numbers
     answer = answer.replace('$', '')  # Remove dollar signs
     answer = answer.replace('%', '')  # Remove percent signs
+    answer = answer.replace('\\', '')  # Remove backslashes
 
     # Remove extra whitespace
     answer = ' '.join(answer.split())
 
-    return answer
+    # Remove trailing punctuation (period, exclamation, question mark)
+    answer = answer.rstrip('.!?')
+
+    return answer.strip()
 
 
 def extract_number(text: str) -> Optional[float]:

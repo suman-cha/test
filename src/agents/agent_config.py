@@ -3,6 +3,10 @@ Agent configuration for N=15 diverse LLM agents.
 
 This module defines the configurations for 15 different agents using
 various models to create natural hammer-spammer dynamics.
+
+IMPORTANT: GPT-4o (openai/gpt-4o) is reserved as the Oracle model for
+validation and should NOT be included as an agent to avoid bias in
+correlation analysis.
 """
 
 from typing import List, Dict
@@ -15,11 +19,12 @@ from typing import List, Dict
 
 AGENT_CONFIGS = [
     # === HIGH-QUALITY MODELS (3) - Strong Hammers ===
+    # NOTE: GPT-4o is reserved as Oracle only (not an agent)
     {
-        "model": "openai/gpt-4o",
-        "name": "gpt4o",
+        "model": "openai/o1-preview",
+        "name": "o1-preview",
         "tier": "high",
-        "description": "OpenAI GPT-4o - flagship model"
+        "description": "OpenAI o1-preview - advanced reasoning model"
     },
     {
         "model": "anthropic/claude-opus-4.6",
@@ -201,7 +206,7 @@ if __name__ == "__main__":
     print_agent_summary()
 
     print("\n\n=== Testing Agent Retrieval ===")
-    test_name = "gpt4o"
+    test_name = "o1-preview"
     config = get_agent_config(test_name)
     print(f"\nRetrieved config for '{test_name}':")
     print(f"  Model: {config['model']}")

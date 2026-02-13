@@ -226,40 +226,57 @@ The final answer should be concise (a number, expression, or short phrase), not 
             if answer:
                 return answer
 
-        # Try to find the last substantial line
-        # Ignore lines that are clearly not answers (like "Here is", "Step", etc.)
-        lines = [line.strip() for line in response_text.split('\n') if line.strip()]
-
-        # Filter out lines that start with common non-answer phrases
-        non_answer_patterns = [
-            r'^(Here|Let|Step|First|Second|Third|Next|Now|So|Thus|We|To|The problem|The question)',
-            r'^#+\s',  # Markdown headers
-            r'^\d+\.',  # Numbered lists
-            r'^-\s',    # Bullet points
-        ]
-
-        filtered_lines = []
-        for line in reversed(lines):  # Start from end
-            # Skip if matches non-answer pattern
-            if any(re.match(pattern, line, re.IGNORECASE) for pattern in non_answer_patterns):
-                continue
-            # Skip if line is too long (likely explanation)
-            if len(line) > 200:
-                continue
-            filtered_lines.append(line)
-            if len(filtered_lines) >= 3:  # Keep last 3 candidates
-                break
-
-        if filtered_lines:
-            # Return the first candidate (last substantial line)
-            answer = filtered_lines[0]
-            # Clean LaTeX delimiters
+        # Try pattern: "the answer is X" or "answer is X"
+        matches = list(re.finditer(r'(?:the\s+)?answer\s+is\s+(.+?)(?:\.|$)', response_text, re.IGNORECASE))
+        if matches:
+            answer = matches[-1].group(1).strip()
             answer = re.sub(r'^\$+|\$+$', '', answer).strip()
-            answer = re.sub(r'^\\\[|\\\]$', '', answer).strip()
-            if answer:
+            # If it's short enough, use it
+            if len(answer) < 100:
                 return answer
 
-        # Last resort: return full text (truncated if too long)
+        # For math problems: try to find standalone numbers or short expressions
+        # Look for lines that are ONLY numbers/math (not part of explanation)
+        lines = [line.strip() for line in response_text.split('\n') if line.strip()]
+
+        # Filter for short lines that look like answers
+        candidate_lines = []
+        for line in reversed(lines):  # Start from end
+            # Skip long lines (likely explanations)
+            if len(line) > 150:
+                continue
+            # Skip lines starting with explanation phrases
+            if re.match(r'^(To\s+find|To\s+solve|We\s+need|We\s+first|Step|First|Let|The\s+equation|The\s+problem)', line, re.IGNORECASE):
+                continue
+            # Skip markdown headers
+            if re.match(r'^#+\s', line):
+                continue
+            # Prefer lines with numbers or short expressions
+            if re.search(r'\d', line) or len(line) < 50:
+                candidate_lines.append(line)
+                if len(candidate_lines) >= 5:
+                    break
+
+        # From candidates, pick the shortest one (likely the answer)
+        if candidate_lines:
+            # Sort by length and pick shortest
+            candidate_lines.sort(key=len)
+            for candidate in candidate_lines:
+                # Clean LaTeX
+                answer = re.sub(r'^\$+|\$+$', '', candidate).strip()
+                answer = re.sub(r'^\\\[|\\\]$', '', answer).strip()
+                answer = re.sub(r'^\\text\{|\}$', '', answer).strip()
+                # If it looks reasonable, use it
+                if answer and len(answer) < 100:
+                    return answer
+
+        # Last resort: find standalone number at end
+        # Look for a number that appears alone on a line or at the end
+        number_lines = [line for line in reversed(lines) if re.match(r'^-?\d+\.?\d*$', line.strip())]
+        if number_lines:
+            return number_lines[0]
+
+        # Absolute last resort: return full text (truncated)
         result = response_text.strip()
         if len(result) > 300:
             result = result[:300] + "..."

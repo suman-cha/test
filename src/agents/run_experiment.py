@@ -415,18 +415,20 @@ class ExperimentRunner:
         print(f"{'='*60}")
 
         track_a_results = {}
+        track_a_detailed = {}  # Per-question detailed results
 
         for k in spammer_counts:
             ccrr_accs = []
             spectral_accs = []
             mv_accs = []
+            track_a_detailed[k] = {}  # Store per-question results for this k
 
             for trial in range(num_trials):
                 ccrr_correct_count = 0
                 spectral_correct_count = 0
                 mv_correct_count = 0
 
-                for result in self.results:
+                for q_idx, result in enumerate(self.results):
                     R_orig = np.array(result['comparison_matrix'])
                     gt = result['ground_truth']
                     answer_strings_orig = [a['answer'] for a in result['answers']]
@@ -486,11 +488,30 @@ class ExperimentRunner:
 
                     mv_idx_new = Baselines.majority_voting(answer_strings_new)
 
-                    if check_correct(answer_strings_new[ccrr_idx_new], gt, self.api_key):
+                    # Check correctness for each method
+                    ccrr_correct = check_correct(answer_strings_new[ccrr_idx_new], gt, self.api_key)
+                    spectral_correct = check_correct(answer_strings_new[spectral_idx_new], gt, self.api_key)
+                    mv_correct = check_correct(answer_strings_new[mv_idx_new], gt, self.api_key)
+
+                    # Store per-question results (first trial only for clarity)
+                    if trial == 0:
+                        if q_idx not in track_a_detailed[k]:
+                            track_a_detailed[k][q_idx] = {
+                                'question': result['question'][:80] + '...' if len(result['question']) > 80 else result['question'],
+                                'gt': gt,
+                                'ccrr': [],
+                                'spectral': [],
+                                'mv': []
+                            }
+                        track_a_detailed[k][q_idx]['ccrr'].append(ccrr_correct)
+                        track_a_detailed[k][q_idx]['spectral'].append(spectral_correct)
+                        track_a_detailed[k][q_idx]['mv'].append(mv_correct)
+
+                    if ccrr_correct:
                         ccrr_correct_count += 1
-                    if check_correct(answer_strings_new[spectral_idx_new], gt, self.api_key):
+                    if spectral_correct:
                         spectral_correct_count += 1
-                    if check_correct(answer_strings_new[mv_idx_new], gt, self.api_key):
+                    if mv_correct:
                         mv_correct_count += 1
 
                 ccrr_acc = ccrr_correct_count / len(self.results) * 100
@@ -514,7 +535,27 @@ class ExperimentRunner:
             print(f"    Spectral:        {np.mean(spectral_accs):.1f}% ± {np.std(spectral_accs):.1f}%")
             print(f"    Majority Vote:   {np.mean(mv_accs):.1f}% ± {np.std(mv_accs):.1f}%")
 
-        return track_a_results
+        # Print detailed per-question breakdown
+        if verbose:
+            print(f"\n{'='*60}")
+            print(f"Track A: Per-Question Detailed Results")
+            print(f"{'='*60}\n")
+
+            for q_idx in range(len(self.results)):
+                print(f"Question {q_idx + 1}: {track_a_detailed[spammer_counts[0]][q_idx]['question']}")
+                print(f"  GT: {track_a_detailed[spammer_counts[0]][q_idx]['gt']}")
+                print(f"\n  {'k':<5} {'CCRR':<10} {'Spectral':<10} {'MV':<10}")
+                print(f"  {'-'*40}")
+
+                for k in spammer_counts:
+                    if q_idx in track_a_detailed[k]:
+                        ccrr_result = '✓' if track_a_detailed[k][q_idx]['ccrr'][0] else '✗'
+                        spectral_result = '✓' if track_a_detailed[k][q_idx]['spectral'][0] else '✗'
+                        mv_result = '✓' if track_a_detailed[k][q_idx]['mv'][0] else '✗'
+                        print(f"  {k:<5} {ccrr_result:<10} {spectral_result:<10} {mv_result:<10}")
+                print()
+
+        return track_a_results, track_a_detailed
 
     # ─────────────────────────────────────────────────────────────
     # Summary & Reporting
@@ -632,7 +673,7 @@ class ExperimentRunner:
         print(f"  Saved to {filepath}")
         return filepath
 
-    def save_results(self, track_a_results: Dict = None):
+    def save_results(self, track_a_results: Dict = None, track_a_detailed: Dict = None):
         """Save final results including Track A if available."""
         output_dir = Path(self.config.get('output_dir', 'results'))
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -644,6 +685,7 @@ class ExperimentRunner:
             'config': self.config,
             'results': self.results,
             'track_a': track_a_results,
+            'track_a_detailed': track_a_detailed,
         }
 
         with open(filepath, 'w') as f:
@@ -728,14 +770,16 @@ def main():
     track_a_results = None
     if args.track_a:
         spammer_counts = [int(x) for x in args.spammer_counts.split(',')]
-        track_a_results = runner.run_track_a(
+        track_a_results, track_a_detailed = runner.run_track_a(
             spammer_counts=spammer_counts,
             num_trials=args.track_a_trials,
         )
+    else:
+        track_a_detailed = None
 
     # ── Print summary & save ──
     runner.print_summary(track_a_results)
-    filepath = runner.save_results(track_a_results)
+    filepath = runner.save_results(track_a_results, track_a_detailed)
 
     print(f"\nDone! Results at: {filepath}")
 

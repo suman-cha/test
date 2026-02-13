@@ -27,10 +27,10 @@ AGENT_CONFIGS = [
         "description": "OpenAI GPT-4 Turbo - highest quality"
     },
     {
-        "model": "anthropic/claude-3.5-sonnet",
+        "model": "anthropic/claude-sonnet-4.5",
         "name": "claude-sonnet",
         "tier": "high",
-        "description": "Anthropic Claude 3.5 Sonnet - top tier reasoning"
+        "description": "Anthropic Claude 4.5 Sonnet - top tier reasoning"
     },
 
     # === MID-TIER MODELS (3) - Moderate Hammers ===

@@ -11,108 +11,106 @@ correlation analysis.
 
 from typing import List, Dict
 
-# N=15 agent configurations using different models
+# N=15 agent configurations - COST OPTIMIZED
 # Distribution:
-# - 3 high-quality models (Strong Hammers)
-# - 6 mid-tier models (Moderate Hammers)
-# - 6 lower-tier models (Potential Spammers)
+# - 5 mid-tier models (Hammers) - 중간 성능 모델
+# - 10 low-tier models (Spammers 후보) - 초저렴 모델
+#
+# Note: spammer는 --epsilon 또는 코드에서 인위적으로 지정
 
 AGENT_CONFIGS = [
-    # === HIGH-QUALITY MODELS (3) - Strong Hammers ===
-    # NOTE: GPT-4o is reserved as Oracle only (not an agent)
-    {
-        "model": "openai/gpt-4-turbo",
-        "name": "gpt4-turbo",
-        "tier": "high",
-        "description": "OpenAI GPT-4 Turbo - high-performance model"
-    },
-    {
-        "model": "anthropic/claude-opus-4.6",
-        "name": "claude-opus",
-        "tier": "high",
-        "description": "Anthropic Claude Opus 4.6 - strongest reasoning"
-    },
-    {
-        "model": "google/gemini-2.5-pro",
-        "name": "gemini-pro",
-        "tier": "high",
-        "description": "Google Gemini 2.5 Pro - advanced capabilities"
-    },
-
-    # === MID-TIER MODELS (6) - Moderate Hammers ===
+    # === MID-TIER MODELS (5) - Hammers (Decent Quality) ===
     {
         "model": "openai/gpt-3.5-turbo",
         "name": "gpt35-turbo",
         "tier": "mid",
-        "description": "OpenAI GPT-3.5 Turbo - fast and capable"
-    },
-    {
-        "model": "anthropic/claude-sonnet-4.5",
-        "name": "claude-sonnet",
-        "tier": "mid",
-        "description": "Anthropic Claude Sonnet 4.5 - balanced performance"
+        "description": "OpenAI GPT-3.5 Turbo - reliable performance"
     },
     {
         "model": "anthropic/claude-haiku-4.5",
         "name": "claude-haiku",
         "tier": "mid",
-        "description": "Anthropic Claude Haiku 4.5 - efficient reasoning"
+        "description": "Anthropic Claude Haiku 4.5 - affordable quality"
     },
     {
         "model": "google/gemini-2.5-flash",
         "name": "gemini-flash",
         "tier": "mid",
-        "description": "Google Gemini 2.5 Flash - fast inference"
+        "description": "Google Gemini 2.5 Flash - fast and cheap"
     },
-    {
-        "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-        "name": "llama-nemotron",
-        "tier": "mid",
-        "description": "NVIDIA Llama Nemotron - optimized performance"
-    },
-    {
-        "model": "google/gemini-3-flash-preview",
-        "name": "gemini-3-flash",
-        "tier": "mid",
-        "description": "Google Gemini 3 Flash Preview - experimental"
-    },
-
-    # === LOWER-TIER MODELS (6) - Potential Spammers ===
     {
         "model": "meta-llama/llama-3.1-70b-instruct",
         "name": "llama-31-70b",
-        "tier": "low",
+        "tier": "mid",
         "description": "Meta Llama 3.1 70B - open source"
-    },
-    {
-        "model": "microsoft/phi-4",
-        "name": "phi-4",
-        "tier": "low",
-        "description": "Microsoft Phi-4 - small but capable"
     },
     {
         "model": "qwen/qwen-2.5-72b-instruct",
         "name": "qwen-72b",
+        "tier": "mid",
+        "description": "Qwen 2.5 72B - Chinese open-source"
+    },
+
+    # === LOW-TIER MODELS (10) - Spammer Candidates (Ultra Cheap) ===
+    {
+        "model": "microsoft/phi-4",
+        "name": "phi-4",
         "tier": "low",
-        "description": "Qwen 2.5 72B - Chinese-developed model"
+        "description": "Microsoft Phi-4 - small model"
     },
     {
-        "model": "mistralai/mistral-large-2407",
-        "name": "mistral-large",
+        "model": "meta-llama/llama-3.1-8b-instruct",
+        "name": "llama-31-8b",
         "tier": "low",
-        "description": "Mistral Large - European AI"
+        "description": "Meta Llama 3.1 8B - tiny"
+    },
+    {
+        "model": "mistralai/mistral-7b-instruct",
+        "name": "mistral-7b",
+        "tier": "low",
+        "description": "Mistral 7B - ultra affordable"
+    },
+    {
+        "model": "google/gemma-2-9b-it",
+        "name": "gemma-9b",
+        "tier": "low",
+        "description": "Google Gemma 2 9B - open-source"
+    },
+    {
+        "model": "microsoft/phi-3-mini-128k-instruct",
+        "name": "phi-3-mini",
+        "tier": "low",
+        "description": "Microsoft Phi-3 Mini - very tiny"
     },
     {
         "model": "deepseek/deepseek-chat",
         "name": "deepseek",
         "tier": "low",
-        "description": "DeepSeek Chat - reasoning specialist"
+        "description": "DeepSeek Chat - budget model"
     },
     {
-        "model": "anthropic/claude-3.5-sonnet",
-        "name": "claude-35-sonnet",
+        "model": "mistralai/mistral-small-2402",
+        "name": "mistral-small",
         "tier": "low",
-        "description": "Anthropic Claude 3.5 Sonnet - efficient model"
+        "description": "Mistral Small - compact"
+    },
+    {
+        "model": "meta-llama/llama-3-8b-instruct",
+        "name": "llama-3-8b",
+        "tier": "low",
+        "description": "Llama 3 8B - lightweight"
+    },
+    {
+        "model": "google/gemma-7b-it",
+        "name": "gemma-7b",
+        "tier": "low",
+        "description": "Google Gemma 7B - small"
+    },
+    {
+        "model": "microsoft/phi-2",
+        "name": "phi-2",
+        "tier": "low",
+        "description": "Microsoft Phi-2 - minimal cost"
     },
 ]
 

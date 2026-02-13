@@ -115,9 +115,76 @@ def normalize_answer(s: str) -> str:
     return s
 
 
-def check_correct(answer: str, ground_truth: str) -> bool:
-    """Check if an answer matches the ground truth."""
-    return normalize_answer(answer) == normalize_answer(ground_truth)
+def check_correct_with_llm(answer: str, ground_truth: str, api_key: str) -> bool:
+    """
+    Check if an answer is correct using GPT-4o as judge.
+
+    This handles mathematical equivalence better than string matching.
+    For example: "x \\in [-2, 7]" vs "[-2, 7]" vs "-2 ≤ x ≤ 7"
+    """
+    import requests
+
+    prompt = f"""You are a mathematical answer checker. Compare the student's answer with the ground truth answer.
+
+Ground Truth: {ground_truth}
+Student Answer: {answer}
+
+Determine if the student's answer is mathematically equivalent to the ground truth, even if the format is different.
+
+Consider these equivalent:
+- "x \\in [-2, 7]" = "[-2, 7]" = "-2 ≤ x ≤ 7"
+- "42" = "42.0" = "42.00"
+- "1/2" = "0.5"
+- Different LaTeX formatting of the same expression
+
+Respond with ONLY "CORRECT" or "INCORRECT" - nothing else."""
+
+    try:
+        response = requests.post(
+            'https://openrouter.ai/api/v1/chat/completions',
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+            },
+            json={
+                'model': 'openai/gpt-4o',
+                'messages': [{'role': 'user', 'content': prompt}],
+                'temperature': 0.0,
+            },
+            timeout=30
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            judgment = result['choices'][0]['message']['content'].strip().upper()
+            return 'CORRECT' in judgment
+        else:
+            # Fallback to string matching if API fails
+            return normalize_answer(answer) == normalize_answer(ground_truth)
+
+    except Exception as e:
+        # Fallback to string matching if error occurs
+        print(f"  Warning: LLM judge failed ({e}), using string match")
+        return normalize_answer(answer) == normalize_answer(ground_truth)
+
+
+def check_correct(answer: str, ground_truth: str, api_key: str = None, use_llm: bool = True) -> bool:
+    """
+    Check if an answer matches the ground truth.
+
+    Args:
+        answer: The answer to check
+        ground_truth: The correct answer
+        api_key: OpenRouter API key (required if use_llm=True)
+        use_llm: If True, use GPT-4o for semantic checking; if False, use string matching
+
+    Returns:
+        True if correct, False otherwise
+    """
+    if use_llm and api_key:
+        return check_correct_with_llm(answer, ground_truth, api_key)
+    else:
+        return normalize_answer(answer) == normalize_answer(ground_truth)
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -214,22 +281,23 @@ class ExperimentRunner:
         rand_idx = Baselines.random_selection(len(answer_strings), seed=idx)
 
         # ── Step 4: Validate against ground truth ──
-        ccrr_correct = check_correct(answer_strings[ccrr_idx], ground_truth)
-        spectral_correct = check_correct(answer_strings[spectral_idx], ground_truth)
-        mv_correct = check_correct(answer_strings[mv_idx], ground_truth)
-        rand_correct = check_correct(answer_strings[rand_idx], ground_truth)
+        # Use GPT-4o as oracle judge for semantic equivalence
+        ccrr_correct = check_correct(answer_strings[ccrr_idx], ground_truth, self.api_key)
+        spectral_correct = check_correct(answer_strings[spectral_idx], ground_truth, self.api_key)
+        mv_correct = check_correct(answer_strings[mv_idx], ground_truth, self.api_key)
+        rand_correct = check_correct(answer_strings[rand_idx], ground_truth, self.api_key)
 
         # Check how many agents got the right answer (for context)
-        agent_correctness = [check_correct(a, ground_truth) for a in answer_strings]
+        agent_correctness = [check_correct(a, ground_truth, self.api_key) for a in answer_strings]
         num_correct_agents = sum(agent_correctness)
 
         # Oracle: best single agent (upper bound)
         oracle_idx = 0  # Best single model (first agent)
         for i, ans in enumerate(answer_strings):
-            if check_correct(ans, ground_truth):
+            if check_correct(ans, ground_truth, self.api_key):
                 oracle_idx = i
                 break
-        oracle_correct = check_correct(answer_strings[oracle_idx], ground_truth)
+        oracle_correct = check_correct(answer_strings[oracle_idx], ground_truth, self.api_key)
 
         # ── Print result ──
         print(f"\n  Results:")
@@ -361,9 +429,9 @@ class ExperimentRunner:
                     ccrr_idx_new = ccrr_new.select_best(R_new)
                     mv_idx_new = Baselines.majority_voting(answer_strings)
 
-                    if check_correct(answer_strings[ccrr_idx_new], gt):
+                    if check_correct(answer_strings[ccrr_idx_new], gt, self.api_key):
                         ccrr_correct_count += 1
-                    if check_correct(answer_strings[mv_idx_new], gt):
+                    if check_correct(answer_strings[mv_idx_new], gt, self.api_key):
                         mv_correct_count += 1
 
                 ccrr_acc = ccrr_correct_count / len(self.results) * 100

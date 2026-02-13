@@ -719,8 +719,8 @@ def parse_args():
 
     parser.add_argument('--track-a', action='store_true',
                         help='Also run Track A (spammer injection) analysis')
-    parser.add_argument('--spammer-counts', type=str, default='0,3,5,7,8',
-                        help='Comma-separated spammer counts for Track A (default: 0,3,5,7,8)')
+    parser.add_argument('--spammer-ratios', type=str, default='0.0,0.3,0.5,0.7,0.8',
+                        help='Comma-separated spammer ratios for Track A (0.0-1.0, default: 0.0,0.3,0.5,0.7,0.8)')
     parser.add_argument('--track-a-trials', type=int, default=5,
                         help='Random trials per spammer count in Track A')
 
@@ -769,7 +769,15 @@ def main():
     # ── Track A: Spammer injection (optional) ──
     track_a_results = None
     if args.track_a:
-        spammer_counts = [int(x) for x in args.spammer_counts.split(',')]
+        # Parse spammer ratios and convert to actual counts
+        spammer_ratios = [float(x) for x in args.spammer_ratios.split(',')]
+        num_agents = config['num_agents']
+        spammer_counts = [int(round(ratio * num_agents)) for ratio in spammer_ratios]
+
+        print(f"\nSpammer ratios → counts (N={num_agents}):")
+        for ratio, count in zip(spammer_ratios, spammer_counts):
+            print(f"  {ratio:.1%} → {count} agents")
+
         track_a_results, track_a_detailed = runner.run_track_a(
             spammer_counts=spammer_counts,
             num_trials=args.track_a_trials,

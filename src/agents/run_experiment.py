@@ -30,6 +30,7 @@ from src.agents.agent_config import AGENT_CONFIGS
 from src.agents.agent_system import AgentSystem
 from src.algorithm.hammer_spammer import HammerSpammerRanking
 from src.algorithm.ccrr import CCRRanking
+from src.algorithm.swra import SWRARanking
 from src.evaluation.validator import Validator
 from src.evaluation.baselines import Baselines
 
@@ -90,8 +91,14 @@ class ExperimentRunner:
             epsilon=config['epsilon'],
             T=config.get('ccrr_iterations', 5)
         )
+        self.algorithm_swra = SWRARanking(
+            k=config.get('swra_k', 2),
+            max_iter=config.get('swra_iterations', 15),
+            version=config.get('swra_version', 'iterative')
+        )
         print("  - SVD-based Hammer-Spammer")
         print("  - CCRR (Cross-Consistency Robust Ranking)")
+        print("  - SWRA v2 (Spectral Weighted Rank Aggregation)")
 
         # Initialize validator
         print(f"\nInitializing validator (oracle={config['oracle_model']})...")
@@ -143,6 +150,10 @@ class ExperimentRunner:
         ccrr_idx, ccrr_scores, ccrr_weights = self.algorithm_ccrr.select_best(R, return_details=True)
         ccrr_answer = answer_strings[ccrr_idx]
 
+        # SWRA v2
+        swra_idx, swra_scores, swra_weights = self.algorithm_swra.select_best(R, return_details=True)
+        swra_answer = answer_strings[swra_idx]
+
         # Apply baselines
         if self.config['verbose']:
             print("Applying baseline methods...")
@@ -163,6 +174,11 @@ class ExperimentRunner:
 
         ccrr_validation = self.validator.validate_with_ground_truth(
             selected_answer=ccrr_answer,
+            ground_truth=ground_truth
+        )
+
+        swra_validation = self.validator.validate_with_ground_truth(
+            selected_answer=swra_answer,
             ground_truth=ground_truth
         )
 
@@ -230,6 +246,14 @@ class ExperimentRunner:
             'ccrr_scores': ccrr_scores.tolist(),
             'ccrr_weights': ccrr_weights.tolist(),
 
+            # SWRA v2 Algorithm results
+            'swra_selected_idx': swra_idx,
+            'swra_answer': swra_answer,
+            'swra_correct': swra_validation['correct'],
+            'swra_validation': swra_validation,
+            'swra_scores': swra_scores.tolist(),
+            'swra_weights': swra_weights.tolist(),
+
             # Baseline results
             'baseline_selections': baseline_selections,
             'baseline_validations': baseline_validations,
@@ -266,6 +290,7 @@ class ExperimentRunner:
                 print(f"\nResult:")
                 print(f"  CCRR: {'✓' if result['ccrr_correct'] else '✗'} (Answer: {result['ccrr_answer']})")
                 print(f"  SVD: {'✓' if result['svd_correct'] else '✗'} (Answer: {result['svd_answer']})")
+                print(f"  SWRA v2: {'✓' if result['swra_correct'] else '✗'} (Answer: {result['swra_answer']})")
                 print(f"  Ground truth: {result['ground_truth']}")
 
                 for baseline, validation in result['baseline_validations'].items():
@@ -304,6 +329,10 @@ class ExperimentRunner:
         svd_correct = sum(1 for r in self.results if r['svd_correct'])
         svd_accuracy = svd_correct / num_questions * 100
 
+        # SWRA performance
+        swra_correct = sum(1 for r in self.results if r['swra_correct'])
+        swra_accuracy = swra_correct / num_questions * 100
+
         # Baseline performance
         baseline_accuracies = {}
         for baseline_name in self.results[0]['baseline_validations'].keys():
@@ -335,6 +364,8 @@ class ExperimentRunner:
             'ccrr_correct': ccrr_correct,
             'svd_accuracy': svd_accuracy,
             'svd_correct': svd_correct,
+            'swra_accuracy': swra_accuracy,
+            'swra_correct': swra_correct,
             'baseline_accuracies': baseline_accuracies,
             'oracle_stats': oracle_stats,
             'agent_stats': agent_stats,
@@ -360,6 +391,7 @@ class ExperimentRunner:
         # Aggregate agent scores across all questions
         ccrr_scores_per_question = []
         svd_scores_per_question = []
+        swra_scores_per_question = []
         oracle_scores_per_question = []
         gt_scores_per_question = []
 
@@ -367,6 +399,7 @@ class ExperimentRunner:
             # Algorithm estimated scores
             ccrr_scores_per_question.append(result['ccrr_scores'])
             svd_scores_per_question.append(result['svd_scores'])
+            swra_scores_per_question.append(result['swra_scores'])
 
             # Oracle/GT scores
             if result.get('agent_evaluation'):
@@ -379,6 +412,7 @@ class ExperimentRunner:
         # Compute average scores per agent across all questions
         ccrr_avg = np.mean(ccrr_scores_per_question, axis=0) if ccrr_scores_per_question else None
         svd_avg = np.mean(svd_scores_per_question, axis=0) if svd_scores_per_question else None
+        swra_avg = np.mean(swra_scores_per_question, axis=0) if swra_scores_per_question else None
         oracle_avg = np.mean(oracle_scores_per_question, axis=0) if oracle_scores_per_question else None
         gt_avg = np.mean(gt_scores_per_question, axis=0) if gt_scores_per_question else None
 
@@ -387,6 +421,7 @@ class ExperimentRunner:
             'num_questions_evaluated': len(self.results),
             'ccrr_scores': ccrr_avg.tolist() if ccrr_avg is not None else None,
             'svd_scores': svd_avg.tolist() if svd_avg is not None else None,
+            'swra_scores': swra_avg.tolist() if swra_avg is not None else None,
             'oracle_scores': oracle_avg.tolist() if oracle_avg is not None else None,
             'ground_truth_scores': gt_avg.tolist() if gt_avg is not None else None,
         }
@@ -415,6 +450,16 @@ class ExperimentRunner:
                     'spearman_p_value': float(svd_sp)
                 }
 
+            if swra_avg is not None:
+                swra_pearson, swra_p = pearsonr(swra_avg, oracle_avg)
+                swra_spearman, swra_sp = spearmanr(swra_avg, oracle_avg)
+                analysis['swra_vs_oracle'] = {
+                    'pearson_correlation': float(swra_pearson),
+                    'pearson_p_value': float(swra_p),
+                    'spearman_correlation': float(swra_spearman),
+                    'spearman_p_value': float(swra_sp)
+                }
+
         # Compute correlations with ground truth if available
         if gt_avg is not None:
             from scipy.stats import pearsonr, spearmanr
@@ -437,6 +482,16 @@ class ExperimentRunner:
                     'pearson_p_value': float(svd_p_gt),
                     'spearman_correlation': float(svd_spearman_gt),
                     'spearman_p_value': float(svd_sp_gt)
+                }
+
+            if swra_avg is not None:
+                swra_pearson_gt, swra_p_gt = pearsonr(swra_avg, gt_avg)
+                swra_spearman_gt, swra_sp_gt = spearmanr(swra_avg, gt_avg)
+                analysis['swra_vs_ground_truth'] = {
+                    'pearson_correlation': float(swra_pearson_gt),
+                    'pearson_p_value': float(swra_p_gt),
+                    'spearman_correlation': float(swra_spearman_gt),
+                    'spearman_p_value': float(swra_sp_gt)
                 }
 
         return analysis
@@ -472,6 +527,7 @@ class ExperimentRunner:
         print("Algorithms:")
         print(f"  CCRR (Cross-Consistency): {stats['ccrr_accuracy']:.2f}% ({stats['ccrr_correct']}/{stats['num_questions']})")
         print(f"  SVD (Hammer-Spammer):     {stats['svd_accuracy']:.2f}% ({stats['svd_correct']}/{stats['num_questions']})")
+        print(f"  SWRA v2 (Spectral Weighted): {stats['swra_accuracy']:.2f}% ({stats['swra_correct']}/{stats['num_questions']})")
         print()
 
         # Sort baselines by accuracy
@@ -512,6 +568,13 @@ class ExperimentRunner:
                 print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
                 print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
 
+            # SWRA vs Oracle
+            if lsa.get('swra_vs_oracle'):
+                corr = lsa['swra_vs_oracle']
+                print(f"\nSWRA v2 Algorithm vs Oracle:")
+                print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
+                print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
+
             # CCRR vs Ground Truth
             if lsa.get('ccrr_vs_ground_truth'):
                 corr = lsa['ccrr_vs_ground_truth']
@@ -523,6 +586,13 @@ class ExperimentRunner:
             if lsa.get('svd_vs_ground_truth'):
                 corr = lsa['svd_vs_ground_truth']
                 print(f"\nSVD Algorithm vs Ground Truth:")
+                print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
+                print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
+
+            # SWRA vs Ground Truth
+            if lsa.get('swra_vs_ground_truth'):
+                corr = lsa['swra_vs_ground_truth']
+                print(f"\nSWRA v2 Algorithm vs Ground Truth:")
                 print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
                 print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
 

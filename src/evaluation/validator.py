@@ -238,6 +238,139 @@ REASONING: [your explanation]
         # Return full text if no reasoning section found
         return text.strip()
 
+    def evaluate_all_answers(self, question: str, all_answers: List[str],
+                            ground_truth: Optional[str] = None,
+                            max_retries: int = 3) -> Dict[str, Any]:
+        """
+        Evaluate ALL agent answers to estimate latent quality scores.
+
+        This is for validating the algorithm's ability to identify high-quality
+        agents (hammers) vs low-quality agents (spammers).
+
+        Args:
+            question: The original question
+            all_answers: All N answers from agents
+            ground_truth: Optional ground truth answer
+            max_retries: Maximum retry attempts
+
+        Returns:
+            Dictionary with:
+                - agent_scores_oracle: List[float] - Oracle's quality scores for each agent (0-10)
+                - agent_scores_ground_truth: List[float] - Ground truth correctness (0 or 1)
+                - oracle_best_idx: int - Oracle's choice for best answer
+                - ground_truth_correct_indices: List[int] - Indices of correct answers
+        """
+        result = {
+            'agent_scores_oracle': [],
+            'agent_scores_ground_truth': [],
+            'oracle_best_idx': None,
+            'ground_truth_correct_indices': []
+        }
+
+        # Evaluate with ground truth if available
+        if ground_truth:
+            for i, answer in enumerate(all_answers):
+                is_correct = compare_answers(answer, ground_truth)
+                result['agent_scores_ground_truth'].append(1.0 if is_correct else 0.0)
+                if is_correct:
+                    result['ground_truth_correct_indices'].append(i)
+
+        # Evaluate with oracle if API key available
+        if not self.api_key:
+            return result
+
+        self.oracle_calls += 1
+
+        # Format all answers
+        answers_text = "\n\n".join([
+            f"Answer {i+1}: {ans}"
+            for i, ans in enumerate(all_answers)
+        ])
+
+        prompt = f"""You are an expert mathematics evaluator. Grade each answer to the following question.
+
+Question: {question}
+
+Here are {len(all_answers)} different answers:
+
+{answers_text}
+
+Tasks:
+1. Grade EACH answer on a scale of 0-10 for correctness and quality.
+2. Identify which answer is the BEST overall.
+
+Respond in the following format:
+SCORES: [Answer 1: X.X, Answer 2: X.X, ..., Answer {len(all_answers)}: X.X]
+BEST: [number of the best answer]
+REASONING: [brief explanation]
+"""
+
+        messages = [{"role": "user", "content": prompt}]
+
+        # Make API call
+        for attempt in range(max_retries):
+            try:
+                response = self._make_oracle_call(messages)
+
+                if 'choices' in response and len(response['choices']) > 0:
+                    content = response['choices'][0]['message']['content']
+
+                    # Parse scores for each answer
+                    scores = self._extract_all_scores(content, len(all_answers))
+                    result['agent_scores_oracle'] = scores
+
+                    # Parse best answer
+                    best_idx = self._extract_best_answer(content, len(all_answers))
+                    result['oracle_best_idx'] = best_idx
+
+                    return result
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"Oracle evaluation error (attempt {attempt+1}): {e}")
+                    continue
+                else:
+                    # Return default scores on failure
+                    result['agent_scores_oracle'] = [5.0] * len(all_answers)
+                    result['oracle_best_idx'] = 0
+                    return result
+
+        return result
+
+    def _extract_all_scores(self, text: str, num_answers: int) -> List[float]:
+        """Extract individual scores for all answers from oracle response."""
+        scores = []
+
+        # Look for "SCORES:" section
+        scores_match = re.search(r'SCORES:\s*\[(.*?)\]', text, re.IGNORECASE | re.DOTALL)
+        if scores_match:
+            scores_text = scores_match.group(1)
+            # Extract all numbers (scores)
+            numbers = re.findall(r'(\d+(?:\.\d+)?)', scores_text)
+            for num_str in numbers[:num_answers]:
+                try:
+                    score = float(num_str)
+                    scores.append(max(0.0, min(10.0, score)))
+                except ValueError:
+                    scores.append(5.0)
+
+        # Fallback: look for individual "Answer X: Y.Y" patterns
+        if len(scores) < num_answers:
+            scores = []
+            for i in range(1, num_answers + 1):
+                pattern = f'Answer {i}:?\s*(\d+(?:\.\d+)?)'
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    scores.append(float(match.group(1)))
+                else:
+                    scores.append(5.0)
+
+        # Ensure we have exactly num_answers scores
+        while len(scores) < num_answers:
+            scores.append(5.0)
+
+        return scores[:num_answers]
+
     def get_statistics(self) -> Dict[str, Any]:
         """
         Get validation statistics.

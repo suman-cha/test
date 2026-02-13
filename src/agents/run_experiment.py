@@ -191,6 +191,22 @@ class ExperimentRunner:
                 print(f"Oracle validation failed: {e}")
                 oracle_validation = None
 
+        # Evaluate ALL agent answers for latent score estimation
+        agent_evaluation = None
+        if self.config['use_oracle'] or ground_truth:
+            if self.config['verbose']:
+                print("Evaluating all agent answers for latent score estimation...")
+
+            try:
+                agent_evaluation = self.validator.evaluate_all_answers(
+                    question=question,
+                    all_answers=answer_strings,
+                    ground_truth=ground_truth
+                )
+            except Exception as e:
+                print(f"Agent evaluation failed: {e}")
+                agent_evaluation = None
+
         # Compile results
         result = {
             'question_idx': question_idx,
@@ -220,6 +236,9 @@ class ExperimentRunner:
 
             # Oracle results
             'oracle_validation': oracle_validation,
+
+            # Agent latent score evaluation
+            'agent_evaluation': agent_evaluation,
 
             # Metadata
             'timestamp': experiment_data['timestamp'],
@@ -307,6 +326,9 @@ class ExperimentRunner:
         # Agent statistics
         agent_stats = self.agent_system.get_all_stats()
 
+        # Latent score correlation analysis
+        latent_score_analysis = self._compute_latent_score_correlation()
+
         return {
             'num_questions': num_questions,
             'ccrr_accuracy': ccrr_accuracy,
@@ -316,8 +338,108 @@ class ExperimentRunner:
             'baseline_accuracies': baseline_accuracies,
             'oracle_stats': oracle_stats,
             'agent_stats': agent_stats,
+            'latent_score_analysis': latent_score_analysis,
             'total_time': self.end_time - self.start_time if self.end_time else None
         }
+
+    def _compute_latent_score_correlation(self) -> Dict[str, Any]:
+        """
+        Compute correlation between algorithm's estimated scores and oracle/ground truth scores.
+
+        This validates the algorithm's ability to identify high-quality agents (hammers)
+        vs low-quality agents (spammers).
+
+        Returns:
+            Dictionary with correlation metrics
+        """
+        if not self.results:
+            return {}
+
+        num_agents = self.config['num_agents']
+
+        # Aggregate agent scores across all questions
+        ccrr_scores_per_question = []
+        svd_scores_per_question = []
+        oracle_scores_per_question = []
+        gt_scores_per_question = []
+
+        for result in self.results:
+            # Algorithm estimated scores
+            ccrr_scores_per_question.append(result['ccrr_scores'])
+            svd_scores_per_question.append(result['svd_scores'])
+
+            # Oracle/GT scores
+            if result.get('agent_evaluation'):
+                eval_data = result['agent_evaluation']
+                if eval_data.get('agent_scores_oracle'):
+                    oracle_scores_per_question.append(eval_data['agent_scores_oracle'])
+                if eval_data.get('agent_scores_ground_truth'):
+                    gt_scores_per_question.append(eval_data['agent_scores_ground_truth'])
+
+        # Compute average scores per agent across all questions
+        ccrr_avg = np.mean(ccrr_scores_per_question, axis=0) if ccrr_scores_per_question else None
+        svd_avg = np.mean(svd_scores_per_question, axis=0) if svd_scores_per_question else None
+        oracle_avg = np.mean(oracle_scores_per_question, axis=0) if oracle_scores_per_question else None
+        gt_avg = np.mean(gt_scores_per_question, axis=0) if gt_scores_per_question else None
+
+        analysis = {
+            'num_agents': num_agents,
+            'num_questions_evaluated': len(self.results),
+            'ccrr_scores': ccrr_avg.tolist() if ccrr_avg is not None else None,
+            'svd_scores': svd_avg.tolist() if svd_avg is not None else None,
+            'oracle_scores': oracle_avg.tolist() if oracle_avg is not None else None,
+            'ground_truth_scores': gt_avg.tolist() if gt_avg is not None else None,
+        }
+
+        # Compute correlations if oracle scores available
+        if oracle_avg is not None:
+            from scipy.stats import pearsonr, spearmanr
+
+            if ccrr_avg is not None:
+                ccrr_pearson, ccrr_p = pearsonr(ccrr_avg, oracle_avg)
+                ccrr_spearman, ccrr_sp = spearmanr(ccrr_avg, oracle_avg)
+                analysis['ccrr_vs_oracle'] = {
+                    'pearson_correlation': float(ccrr_pearson),
+                    'pearson_p_value': float(ccrr_p),
+                    'spearman_correlation': float(ccrr_spearman),
+                    'spearman_p_value': float(ccrr_sp)
+                }
+
+            if svd_avg is not None:
+                svd_pearson, svd_p = pearsonr(svd_avg, oracle_avg)
+                svd_spearman, svd_sp = spearmanr(svd_avg, oracle_avg)
+                analysis['svd_vs_oracle'] = {
+                    'pearson_correlation': float(svd_pearson),
+                    'pearson_p_value': float(svd_p),
+                    'spearman_correlation': float(svd_spearman),
+                    'spearman_p_value': float(svd_sp)
+                }
+
+        # Compute correlations with ground truth if available
+        if gt_avg is not None:
+            from scipy.stats import pearsonr, spearmanr
+
+            if ccrr_avg is not None:
+                ccrr_pearson_gt, ccrr_p_gt = pearsonr(ccrr_avg, gt_avg)
+                ccrr_spearman_gt, ccrr_sp_gt = spearmanr(ccrr_avg, gt_avg)
+                analysis['ccrr_vs_ground_truth'] = {
+                    'pearson_correlation': float(ccrr_pearson_gt),
+                    'pearson_p_value': float(ccrr_p_gt),
+                    'spearman_correlation': float(ccrr_spearman_gt),
+                    'spearman_p_value': float(ccrr_sp_gt)
+                }
+
+            if svd_avg is not None:
+                svd_pearson_gt, svd_p_gt = pearsonr(svd_avg, gt_avg)
+                svd_spearman_gt, svd_sp_gt = spearmanr(svd_avg, gt_avg)
+                analysis['svd_vs_ground_truth'] = {
+                    'pearson_correlation': float(svd_pearson_gt),
+                    'pearson_p_value': float(svd_p_gt),
+                    'spearman_correlation': float(svd_spearman_gt),
+                    'spearman_p_value': float(svd_sp_gt)
+                }
+
+        return analysis
 
     def print_summary(self):
         """Print experiment summary."""
@@ -367,6 +489,47 @@ class ExperimentRunner:
             print(f"{'='*60}\n")
             print(f"Average oracle score: {stats['oracle_stats']['avg_score']:.2f}/10")
             print(f"Oracle agreement rate: {stats['oracle_stats']['oracle_agreement_rate']:.2f}%")
+
+        # Latent score correlation analysis
+        if stats.get('latent_score_analysis') and stats['latent_score_analysis']:
+            lsa = stats['latent_score_analysis']
+            print(f"\n{'='*60}")
+            print(f"LATENT SCORE CORRELATION ANALYSIS")
+            print(f"{'='*60}\n")
+            print("This measures how well the algorithms identify agent quality (Hammers vs Spammers)\n")
+
+            # CCRR vs Oracle
+            if lsa.get('ccrr_vs_oracle'):
+                corr = lsa['ccrr_vs_oracle']
+                print(f"CCRR Algorithm vs Oracle:")
+                print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
+                print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
+
+            # SVD vs Oracle
+            if lsa.get('svd_vs_oracle'):
+                corr = lsa['svd_vs_oracle']
+                print(f"\nSVD Algorithm vs Oracle:")
+                print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
+                print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
+
+            # CCRR vs Ground Truth
+            if lsa.get('ccrr_vs_ground_truth'):
+                corr = lsa['ccrr_vs_ground_truth']
+                print(f"\nCCRR Algorithm vs Ground Truth:")
+                print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
+                print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
+
+            # SVD vs Ground Truth
+            if lsa.get('svd_vs_ground_truth'):
+                corr = lsa['svd_vs_ground_truth']
+                print(f"\nSVD Algorithm vs Ground Truth:")
+                print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
+                print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
+
+            print(f"\nInterpretation:")
+            print(f"  - Correlation close to +1: Algorithm correctly identifies agent quality")
+            print(f"  - Higher Spearman: Algorithm correctly ranks agents (Hammers > Spammers)")
+            print(f"  - p-value < 0.05: Statistically significant correlation")
 
         # Agent usage stats
         print(f"\n{'='*60}")

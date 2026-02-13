@@ -38,12 +38,12 @@ echo ""
 echo "========================================"
 echo ""
 
-echo "Running GSM8K (${NUM_QUESTIONS} questions from harder problems)..."
-echo "  Using start-index 800 (later problems are harder)"
+echo "Running GSM8K (${NUM_QUESTIONS} questions from hardest problems)..."
+echo "  Using start-index 900 (multi-step reasoning problems)"
 python -m src.agents.run_experiment \
     --dataset gsm8k \
     --num-questions ${NUM_QUESTIONS} \
-    --start-index 800 \
+    --start-index 900 \
     --output-dir results/main_test/gsm8k_${TIMESTAMP} \
     --save-frequency 10 \
     --verbose
@@ -55,10 +55,13 @@ echo "========================================"
 echo ""
 echo "Results saved to:"
 echo "  - results/main_test/math_${TIMESTAMP}/ (MATH Level 4-5)"
-echo "  - results/main_test/gsm8k_${TIMESTAMP}/ (hard GSM8K problems, index 800+)"
+echo "  - results/main_test/gsm8k_${TIMESTAMP}/ (GSM8K hardest problems, index 900+)"
 echo ""
 echo "To run with custom number of questions:"
 echo "  ./run_main_test.sh 100  # runs 100 questions per dataset"
 echo ""
-echo "These harder problems better demonstrate CCRR's advantage over Majority Voting."
+echo "Why these problems?"
+echo "  - MATH Level 4-5: Complex problems where weak models struggle"
+echo "  - GSM8K 900+: Multi-step reasoning where weak models often fail"
+echo "  → Weak models' low accuracy makes SVD-based weighting more effective"
 echo ""

@@ -1,11 +1,22 @@
 """
 Main Experiment Script for Problem 2.
 
-This script runs the complete LLM agent experiment to validate
-the Hammer-Spammer model algorithm.
+Runs the complete LLM agent experiment to validate the Hammer-Spammer
+model algorithm against baselines.
+
+Two tracks:
+  Track B ("natural"):    All agents use real LLM — tests practical utility.
+  Track A ("artificial"): Post-hoc spammer injection — validates theory.
 
 Usage:
-    python -m src.agents.run_experiment --num-questions 50 --dataset gsm8k
+    # Track B: natural experiment (50 questions, 15 agents)
+    python run_experiment.py --num-questions 50
+
+    # Track A: inject spammers and compare (uses saved Track B data)
+    python run_experiment.py --num-questions 50 --track-a --spammer-counts 0,2,4,6
+
+    # Debug mode: 3 questions, verbose
+    python run_experiment.py --debug
 """
 
 import os
@@ -13,788 +24,547 @@ import sys
 import json
 import argparse
 import time
+import re
+import numpy as np
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 
-import numpy as np
 from dotenv import load_dotenv
 from tqdm import tqdm
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
+# ── Local imports ──
+# Adjust path depending on your project structure
+sys.path.insert(0, str(Path(__file__).parent))
 
-from src.utils.dataset import DatasetLoader
-from src.agents.agent_config import AGENT_CONFIGS
-from src.agents.agent_system import AgentSystem
-from src.algorithm.hammer_spammer import HammerSpammerRanking
-from src.algorithm.ccrr import CCRRanking
-from src.algorithm.swra import SWRARanking
-from src.evaluation.validator import Validator
-from src.evaluation.baselines import Baselines
-from src.evaluation.comparison_analysis import print_comparison_report, generate_latex_table
+from agent_config import AGENT_CONFIGS, print_agent_summary
+from agent_system import AgentSystem
+from spectral_ranking import (
+    spectral_ranking, majority_voting, random_selection,
+    best_single_agent, analyze_weights, _default_match
+)
 
+
+# ═════════════════════════════════════════════════════════════════
+# Dataset loading (self-contained, no external dependency)
+# ═════════════════════════════════════════════════════════════════
+
+def load_gsm8k(num_questions: int = 50, split: str = "test",
+               start_index: int = 0) -> List[Dict[str, str]]:
+    """
+    Load GSM8K dataset from HuggingFace datasets.
+
+    Each item has 'question' and 'answer' (final numerical answer).
+
+    Returns:
+        List of {'question': str, 'answer': str} dicts
+    """
+    try:
+        from datasets import load_dataset
+        ds = load_dataset("gsm8k", "main", split=split)
+    except Exception as e:
+        print(f"Failed to load GSM8K from HuggingFace: {e}")
+        print("Falling back to manual test questions...")
+        return _fallback_questions(num_questions)
+
+    data = []
+    end_index = min(start_index + num_questions, len(ds))
+
+    for i in range(start_index, end_index):
+        item = ds[i]
+        question = item['question']
+
+        # Extract numerical answer from GSM8K format:
+        # "... #### <number>"
+        raw_answer = item['answer']
+        match = re.search(r'####\s*(.+)', raw_answer)
+        if match:
+            answer = match.group(1).strip().replace(',', '')
+        else:
+            answer = raw_answer.strip()
+
+        data.append({'question': question, 'answer': answer})
+
+    print(f"Loaded {len(data)} questions from GSM8K ({split}[{start_index}:{end_index}])")
+    return data
+
+
+def _fallback_questions(n: int) -> List[Dict[str, str]]:
+    """Fallback math questions if dataset loading fails."""
+    questions = [
+        {"question": "Janet's ducks lay 16 eggs per day. She eats three for breakfast every morning and bakes muffins for her friends every day with four. She sells every duck egg at the farmers' market daily for $2. How much in dollars does she make every day at the farmers' market?", "answer": "18"},
+        {"question": "A robe takes 2 bolts of blue fiber and half that much white fiber. How many bolts in total does it take?", "answer": "3"},
+        {"question": "Josh decides to try flipping a house. He buys a house for $80,000 and puts $50,000 in repairs. This increased the value of the house by 150%. How much profit did he make?", "answer": "70000"},
+        {"question": "James writes a 3-page letter to 2 different friends twice a week. How many pages does he write a year?", "answer": "624"},
+        {"question": "Every day, Wendi feeds each of her chickens three cups of mixed chicken feed, containing seeds, mealworms and vegetables to help keep them healthy. She gives the chickens their feed in three separate meals. In the morning, she gives her flock of chickens 15 cups of feed. In the afternoon, she gives her chickens another 25 cups of feed. If the carry-over from the morning to the afternoon is 5 cups, how many cups of feed does she need to give her chickens in the final meal of the day?", "answer": "20"},
+    ]
+    return questions[:n]
+
+
+# ═════════════════════════════════════════════════════════════════
+# Answer matching utilities
+# ═════════════════════════════════════════════════════════════════
+
+def normalize_answer(s: str) -> str:
+    """Normalize an answer string for comparison."""
+    s = str(s).strip().lower()
+    s = s.replace(',', '').replace('$', '').replace('%', '')
+    s = s.replace('\\', '').replace('{', '').replace('}', '')
+    s = s.strip('.')
+    # Try extracting a number
+    match = re.search(r'-?\d+\.?\d*', s)
+    if match:
+        return match.group()
+    return s
+
+
+def check_correct(answer: str, ground_truth: str) -> bool:
+    """Check if an answer matches the ground truth."""
+    return normalize_answer(answer) == normalize_answer(ground_truth)
+
+
+# ═════════════════════════════════════════════════════════════════
+# Experiment Runner
+# ═════════════════════════════════════════════════════════════════
 
 class ExperimentRunner:
     """Main experiment runner for Problem 2."""
 
     def __init__(self, config: Dict[str, Any]):
-        """
-        Initialize experiment runner.
-
-        Args:
-            config: Configuration dictionary
-        """
         self.config = config
         self.results = []
-        self.start_time = None
-        self.end_time = None
-
-        # Initialize components
-        print("Initializing experiment components...")
 
         # Load API key
         load_dotenv()
         api_key = os.getenv('OPENROUTER_API_KEY')
         if not api_key:
-            raise ValueError("OPENROUTER_API_KEY not found in environment")
+            raise ValueError("OPENROUTER_API_KEY not found. Set it in .env or environment.")
 
-        # Initialize dataset
-        print(f"\nLoading dataset: {config['dataset']}")
-        difficulty_str = f" (difficulty: {config.get('difficulty', 'all')})" if config.get('difficulty') else ""
-        print(f"Difficulty filter: {config.get('difficulty', 'all')}{difficulty_str}")
-        self.dataset = DatasetLoader(
-            dataset_name=config['dataset'],
-            split=config['split'],
-            max_samples=config['num_questions'],
-            difficulty_filter=config.get('difficulty'),
-            start_index=config.get('start_index', 0)
+        # Load dataset
+        print(f"\nLoading dataset: GSM8K")
+        self.dataset = load_gsm8k(
+            num_questions=config['num_questions'],
+            split=config.get('split', 'test'),
+            start_index=config.get('start_index', 0),
         )
 
-        # Initialize agent system
-        print(f"\nInitializing {config['num_agents']} agents...")
+        # Initialize agent system (Track B: natural mode)
+        print_agent_summary()
         agent_configs = AGENT_CONFIGS[:config['num_agents']]
-
         self.agent_system = AgentSystem(
             agent_configs=agent_configs,
             api_key=api_key,
-            epsilon=config['epsilon'],
-            parallel_generation=config['parallel_generation'],
-            parallel_comparison=config['parallel_comparison']
+            mode="natural",  # Track B: all real LLM
+            parallel_generation=config.get('parallel_generation', True),
+            parallel_comparison=config.get('parallel_comparison', True),
         )
 
-        # Initialize algorithms
-        print(f"\nInitializing algorithms (beta={config['beta']})...")
-        self.algorithm_svd = HammerSpammerRanking(
-            beta=config['beta'],
-            epsilon=config['epsilon']
-        )
-        self.algorithm_ccrr = CCRRanking(
-            beta=config['beta'],
-            epsilon=config['epsilon'],
-            T=config.get('ccrr_iterations', 5)
-        )
-        self.algorithm_swra = SWRARanking(
-            k=config.get('swra_k', 2),
-            max_iter=config.get('swra_iterations', 15),
-            version=config.get('swra_version', 'iterative')
-        )
-        print("  - SVD-based Hammer-Spammer")
-        print("  - CCRR (Cross-Consistency Robust Ranking)")
-        print("  - SWRA v2 (Spectral Weighted Rank Aggregation)")
+        self.api_key = api_key
+        print(f"\nExperiment ready: {len(self.dataset)} questions, {config['num_agents']} agents")
 
-        # Initialize validator
-        print(f"\nInitializing validator (oracle={config['oracle_model']})...")
-        self.validator = Validator(
-            oracle_model=config['oracle_model'],
-            api_key=api_key
-        )
+    # ─────────────────────────────────────────────────────────────
+    # Run one question
+    # ─────────────────────────────────────────────────────────────
 
-        print("\n" + "="*60)
-        print("Initialization complete!")
-        print("="*60)
+    def run_single_question(self, idx: int) -> Dict[str, Any]:
+        """Run full pipeline for one question."""
+        item = self.dataset[idx]
+        question = item['question']
+        ground_truth = item['answer']
 
-    def run_single_question(self, question_idx: int) -> Dict[str, Any]:
-        """
-        Run experiment for a single question.
+        print(f"\n{'─'*60}")
+        print(f"Question {idx+1}/{len(self.dataset)}")
+        print(f"Q: {question[:120]}...")
+        print(f"GT: {ground_truth}")
 
-        Args:
-            question_idx: Index of question in dataset
-
-        Returns:
-            Results dictionary for this question
-        """
-        # Get question and ground truth
-        question, ground_truth = self.dataset.get_question(question_idx)
-
-        print(f"\nQuestion {question_idx + 1}/{len(self.dataset)}")
-        print(f"Q: {question[:100]}...")
-
-        # Run agent system to get answers and comparison matrix
-        experiment_data = self.agent_system.run_experiment(
+        # ── Step 1-2: Generate answers & build R (via AgentSystem) ──
+        exp_data = self.agent_system.run_question(
             question=question,
             ground_truth=ground_truth,
-            verbose=self.config['verbose']
+            verbose=self.config.get('verbose', False),
         )
 
-        R = experiment_data['comparison_matrix']
-        answers = experiment_data['answers']
+        R = exp_data['comparison_matrix']
+        answers = exp_data['answers']
         answer_strings = [a['answer'] for a in answers]
-        reasoning_strings = [a.get('reasoning', '') for a in answers]
 
-        # Apply algorithms
-        if self.config['verbose']:
-            print("\nApplying algorithms...")
+        # ── Step 3: Apply algorithms ──
+        # SVD Spectral Ranking (our algorithm)
+        svd_idx, svd_scores, svd_weights, svd_details = spectral_ranking(R, return_details=True)
 
-        # SVD-based Hammer-Spammer
-        svd_idx, svd_scores = self.algorithm_svd.select_best(R, return_scores=True)
-        svd_answer = answer_strings[svd_idx]
+        # Majority Voting (baseline)
+        mv_idx, mv_scores = majority_voting(R)
 
-        # CCRR
-        ccrr_idx, ccrr_scores, ccrr_weights = self.algorithm_ccrr.select_best(R, return_details=True)
-        ccrr_answer = answer_strings[ccrr_idx]
+        # Random Selection (baseline)
+        rand_idx = random_selection(len(answer_strings), seed=idx)
 
-        # SWRA v2
-        swra_idx, swra_scores, swra_weights = self.algorithm_swra.select_best(R, return_details=True)
-        swra_answer = answer_strings[swra_idx]
+        # ── Step 4: Validate against ground truth ──
+        svd_correct = check_correct(answer_strings[svd_idx], ground_truth)
+        mv_correct = check_correct(answer_strings[mv_idx], ground_truth)
+        rand_correct = check_correct(answer_strings[rand_idx], ground_truth)
 
-        # Apply baselines
-        if self.config['verbose']:
-            print("Applying baseline methods...")
+        # Check how many agents got the right answer (for context)
+        agent_correctness = [check_correct(a, ground_truth) for a in answer_strings]
+        num_correct_agents = sum(agent_correctness)
 
-        baseline_selections = Baselines.apply_all_baselines(
-            answers=answer_strings,
-            comparison_matrix=R
-        )
+        # Oracle: best single agent (upper bound)
+        oracle_idx, oracle_status = best_single_agent(answer_strings, ground_truth)
+        oracle_correct = (oracle_status == "found")
 
-        # Validate algorithms with ground truth
-        if self.config['verbose']:
-            print("Validating with ground truth...")
+        # ── Print result ──
+        print(f"\n  Results:")
+        print(f"    SVD Spectral:    {'✓' if svd_correct else '✗'}  → {answer_strings[svd_idx]}")
+        print(f"    Majority Vote:   {'✓' if mv_correct else '✗'}  → {answer_strings[mv_idx]}")
+        print(f"    Random:          {'✓' if rand_correct else '✗'}  → {answer_strings[rand_idx]}")
+        print(f"    Oracle (upper):  {'✓' if oracle_correct else '✗'}")
+        print(f"    Agents correct:  {num_correct_agents}/{len(answer_strings)}")
+        print(f"    Spectral gap:    {svd_details['spectral_gap']:.2f}")
 
-        svd_validation = self.validator.validate_with_ground_truth(
-            selected_answer=svd_answer,
-            ground_truth=ground_truth
-        )
-
-        ccrr_validation = self.validator.validate_with_ground_truth(
-            selected_answer=ccrr_answer,
-            ground_truth=ground_truth
-        )
-
-        swra_validation = self.validator.validate_with_ground_truth(
-            selected_answer=swra_answer,
-            ground_truth=ground_truth
-        )
-
-        # Validate baselines
-        baseline_validations = {}
-        for baseline_name, baseline_idx in baseline_selections.items():
-            baseline_answer = answer_strings[baseline_idx]
-            baseline_validations[baseline_name] = self.validator.validate_with_ground_truth(
-                selected_answer=baseline_answer,
-                ground_truth=ground_truth
-            )
-
-        # Oracle validation (if enabled) - validate CCRR since it's the main algorithm
-        oracle_validation = None
-        if self.config['use_oracle']:
-            if self.config['verbose']:
-                print("Validating with oracle model...")
-
-            try:
-                oracle_validation = self.validator.validate_with_oracle(
-                    question=question,
-                    selected_answer=ccrr_answer,
-                    all_answers=answer_strings,
-                    all_reasonings=reasoning_strings,
-                    selected_idx=ccrr_idx
-                )
-            except Exception as e:
-                print(f"Oracle validation failed: {e}")
-                oracle_validation = None
-
-        # Evaluate ALL agent answers for latent score estimation
-        agent_evaluation = None
-        if self.config['use_oracle'] or ground_truth:
-            if self.config['verbose']:
-                print("Evaluating all agent answers for latent score estimation...")
-
-            try:
-                agent_evaluation = self.validator.evaluate_all_answers(
-                    question=question,
-                    all_answers=answer_strings,
-                    all_reasonings=reasoning_strings,
-                    ground_truth=ground_truth
-                )
-            except Exception as e:
-                print(f"Agent evaluation failed: {e}")
-                agent_evaluation = None
-
-        # Compile results
-        result = {
-            'question_idx': question_idx,
+        # ── Compile result ──
+        return {
+            'question_idx': idx,
             'question': question,
             'ground_truth': ground_truth,
-            'answers': answers,
+            'answers': [{'agent': a['agent_name'], 'answer': a['answer'],
+                         'model': a['model_id']} for a in answers],
             'comparison_matrix': R.tolist(),
 
-            # SVD Algorithm results
-            'svd_selected_idx': svd_idx,
-            'svd_answer': svd_answer,
-            'svd_correct': svd_validation['correct'],
-            'svd_validation': svd_validation,
+            # Algorithm results
+            'svd_idx': svd_idx,
+            'svd_answer': answer_strings[svd_idx],
+            'svd_correct': svd_correct,
             'svd_scores': svd_scores.tolist(),
+            'svd_weights': svd_weights.tolist(),
+            'svd_spectral_gap': svd_details['spectral_gap'],
 
-            # CCRR Algorithm results
-            'ccrr_selected_idx': ccrr_idx,
-            'ccrr_answer': ccrr_answer,
-            'ccrr_correct': ccrr_validation['correct'],
-            'ccrr_validation': ccrr_validation,
-            'ccrr_scores': ccrr_scores.tolist(),
-            'ccrr_weights': ccrr_weights.tolist(),
+            'mv_idx': mv_idx,
+            'mv_answer': answer_strings[mv_idx],
+            'mv_correct': mv_correct,
 
-            # SWRA v2 Algorithm results
-            'swra_selected_idx': swra_idx,
-            'swra_answer': swra_answer,
-            'swra_correct': swra_validation['correct'],
-            'swra_validation': swra_validation,
-            'swra_scores': swra_scores.tolist(),
-            'swra_weights': swra_weights.tolist(),
+            'rand_idx': rand_idx,
+            'rand_correct': rand_correct,
 
-            # Baseline results
-            'baseline_selections': baseline_selections,
-            'baseline_validations': baseline_validations,
+            'oracle_correct': oracle_correct,
+            'num_correct_agents': num_correct_agents,
+            'agent_correctness': agent_correctness,
+            'agent_tiers': exp_data['agent_tiers'],
+            'agent_names': exp_data['agent_names'],
 
-            # Oracle results
-            'oracle_validation': oracle_validation,
-
-            # Agent latent score evaluation
-            'agent_evaluation': agent_evaluation,
-
-            # Agent types (1=hammer, 0=spammer)
-            'agent_types': experiment_data.get('agent_types'),
-
-            # Metadata
-            'timestamp': experiment_data['timestamp'],
-            'elapsed_time': experiment_data['elapsed_time']
+            'elapsed_time': exp_data['elapsed_time'],
         }
 
-        return result
+    # ─────────────────────────────────────────────────────────────
+    # Run all questions (Track B)
+    # ─────────────────────────────────────────────────────────────
 
-    def run_all_questions(self):
-        """Run experiment on all questions."""
-        self.start_time = time.time()
+    def run_all(self):
+        """Run Track B experiment on all questions."""
+        start_time = time.time()
 
         print(f"\n{'='*60}")
-        print(f"Running experiment on {len(self.dataset)} questions")
-        print(f"{'='*60}\n")
+        print(f"Track B: Natural LLM Experiment ({len(self.dataset)} questions)")
+        print(f"{'='*60}")
 
-        num_questions = len(self.dataset)
-
-        for i in range(num_questions):
+        for i in range(len(self.dataset)):
             try:
                 result = self.run_single_question(i)
                 self.results.append(result)
 
-                # Print summary
-                print(f"\nResult:")
-                print(f"  CCRR: {'✓' if result['ccrr_correct'] else '✗'}")
-                print(f"    Answer: {result['ccrr_answer']}")
-                print(f"  SVD: {'✓' if result['svd_correct'] else '✗'}")
-                print(f"    Answer: {result['svd_answer']}")
-                print(f"  SWRA v2: {'✓' if result['swra_correct'] else '✗'}")
-                print(f"    Answer: {result['swra_answer']}")
-                print(f"  Ground truth: {result['ground_truth']}")
-
-                for baseline, validation in result['baseline_validations'].items():
-                    symbol = '✓' if validation['correct'] else '✗'
-                    print(f"  {baseline}: {symbol}")
-
-                # Save intermediate results
-                if (i + 1) % self.config['save_frequency'] == 0:
-                    self.save_results(intermediate=True)
+                # Intermediate save
+                if (i + 1) % self.config.get('save_frequency', 10) == 0:
+                    self._save("intermediate")
 
             except Exception as e:
-                print(f"\nError processing question {i}: {e}")
+                print(f"\n  ERROR on question {i}: {e}")
                 import traceback
                 traceback.print_exc()
-                continue
 
-        self.end_time = time.time()
-
+        total_time = time.time() - start_time
         print(f"\n{'='*60}")
-        print(f"Experiment completed!")
-        print(f"Total time: {self.end_time - self.start_time:.1f}s")
-        print(f"{'='*60}\n")
+        print(f"Track B complete! {len(self.results)} questions in {total_time:.0f}s")
+        print(f"{'='*60}")
 
-    def compute_summary_statistics(self) -> Dict[str, Any]:
-        """Compute summary statistics from results."""
-        if not self.results:
-            return {}
+    # ─────────────────────────────────────────────────────────────
+    # Track A: Post-hoc spammer injection
+    # ─────────────────────────────────────────────────────────────
 
-        num_questions = len(self.results)
-
-        # CCRR performance
-        ccrr_correct = sum(1 for r in self.results if r['ccrr_correct'])
-        ccrr_accuracy = ccrr_correct / num_questions * 100
-
-        # SVD performance
-        svd_correct = sum(1 for r in self.results if r['svd_correct'])
-        svd_accuracy = svd_correct / num_questions * 100
-
-        # SWRA performance
-        swra_correct = sum(1 for r in self.results if r['swra_correct'])
-        swra_accuracy = swra_correct / num_questions * 100
-
-        # Baseline performance
-        baseline_accuracies = {}
-        for baseline_name in self.results[0]['baseline_validations'].keys():
-            correct = sum(1 for r in self.results
-                         if r['baseline_validations'][baseline_name]['correct'])
-            baseline_accuracies[baseline_name] = correct / num_questions * 100
-
-        # Oracle performance (if available)
-        oracle_stats = None
-        if self.config['use_oracle']:
-            oracle_results = [r['oracle_validation'] for r in self.results
-                            if r['oracle_validation'] is not None]
-            if oracle_results:
-                oracle_stats = {
-                    'avg_score': np.mean([o['oracle_score'] for o in oracle_results]),
-                    'matches_oracle': sum(1 for o in oracle_results if o['matches_oracle']),
-                    'oracle_agreement_rate': sum(1 for o in oracle_results if o['matches_oracle']) / len(oracle_results) * 100
-                }
-
-        # Agent statistics
-        agent_stats = self.agent_system.get_all_stats()
-
-        # Latent score correlation analysis
-        latent_score_analysis = self._compute_latent_score_correlation()
-
-        return {
-            'num_questions': num_questions,
-            'ccrr_accuracy': ccrr_accuracy,
-            'ccrr_correct': ccrr_correct,
-            'svd_accuracy': svd_accuracy,
-            'svd_correct': svd_correct,
-            'swra_accuracy': swra_accuracy,
-            'swra_correct': swra_correct,
-            'baseline_accuracies': baseline_accuracies,
-            'oracle_stats': oracle_stats,
-            'agent_stats': agent_stats,
-            'latent_score_analysis': latent_score_analysis,
-            'total_time': self.end_time - self.start_time if self.end_time else None
-        }
-
-    def _compute_latent_score_correlation(self) -> Dict[str, Any]:
+    def run_track_a(self, spammer_counts: List[int], num_trials: int = 5):
         """
-        Compute correlation between algorithm's estimated scores and oracle/ground truth scores.
+        Run Track A analysis on saved Track B results.
 
-        This validates the algorithm's ability to identify high-quality agents (hammers)
-        vs low-quality agents (spammers).
-
-        Returns:
-            Dictionary with correlation metrics
-        """
-        if not self.results:
-            return {}
-
-        num_agents = self.config['num_agents']
-
-        # Aggregate agent scores across all questions
-        ccrr_scores_per_question = []
-        svd_scores_per_question = []
-        swra_scores_per_question = []
-        oracle_scores_per_question = []
-        gt_scores_per_question = []
-
-        for result in self.results:
-            # Algorithm estimated scores
-            ccrr_scores_per_question.append(result['ccrr_scores'])
-            svd_scores_per_question.append(result['svd_scores'])
-            swra_scores_per_question.append(result['swra_scores'])
-
-            # Oracle/GT scores
-            if result.get('agent_evaluation'):
-                eval_data = result['agent_evaluation']
-                if eval_data.get('agent_scores_oracle'):
-                    oracle_scores_per_question.append(eval_data['agent_scores_oracle'])
-                if eval_data.get('agent_scores_ground_truth'):
-                    gt_scores_per_question.append(eval_data['agent_scores_ground_truth'])
-
-        # Compute average scores per agent across all questions
-        ccrr_avg = np.mean(ccrr_scores_per_question, axis=0) if ccrr_scores_per_question else None
-        svd_avg = np.mean(svd_scores_per_question, axis=0) if svd_scores_per_question else None
-        swra_avg = np.mean(swra_scores_per_question, axis=0) if swra_scores_per_question else None
-        oracle_avg = np.mean(oracle_scores_per_question, axis=0) if oracle_scores_per_question else None
-        gt_avg = np.mean(gt_scores_per_question, axis=0) if gt_scores_per_question else None
-
-        analysis = {
-            'num_agents': num_agents,
-            'num_questions_evaluated': len(self.results),
-            'ccrr_scores': ccrr_avg.tolist() if ccrr_avg is not None else None,
-            'svd_scores': svd_avg.tolist() if svd_avg is not None else None,
-            'swra_scores': swra_avg.tolist() if swra_avg is not None else None,
-            'oracle_scores': oracle_avg.tolist() if oracle_avg is not None else None,
-            'ground_truth_scores': gt_avg.tolist() if gt_avg is not None else None,
-        }
-
-        # Compute correlations if oracle scores available
-        if oracle_avg is not None:
-            from scipy.stats import pearsonr, spearmanr
-
-            if ccrr_avg is not None:
-                ccrr_pearson, ccrr_p = pearsonr(ccrr_avg, oracle_avg)
-                ccrr_spearman, ccrr_sp = spearmanr(ccrr_avg, oracle_avg)
-                analysis['ccrr_vs_oracle'] = {
-                    'pearson_correlation': float(ccrr_pearson),
-                    'pearson_p_value': float(ccrr_p),
-                    'spearman_correlation': float(ccrr_spearman),
-                    'spearman_p_value': float(ccrr_sp)
-                }
-
-            if svd_avg is not None:
-                svd_pearson, svd_p = pearsonr(svd_avg, oracle_avg)
-                svd_spearman, svd_sp = spearmanr(svd_avg, oracle_avg)
-                analysis['svd_vs_oracle'] = {
-                    'pearson_correlation': float(svd_pearson),
-                    'pearson_p_value': float(svd_p),
-                    'spearman_correlation': float(svd_spearman),
-                    'spearman_p_value': float(svd_sp)
-                }
-
-            if swra_avg is not None:
-                swra_pearson, swra_p = pearsonr(swra_avg, oracle_avg)
-                swra_spearman, swra_sp = spearmanr(swra_avg, oracle_avg)
-                analysis['swra_vs_oracle'] = {
-                    'pearson_correlation': float(swra_pearson),
-                    'pearson_p_value': float(swra_p),
-                    'spearman_correlation': float(swra_spearman),
-                    'spearman_p_value': float(swra_sp)
-                }
-
-        # Compute correlations with ground truth if available
-        if gt_avg is not None:
-            from scipy.stats import pearsonr, spearmanr
-
-            if ccrr_avg is not None:
-                ccrr_pearson_gt, ccrr_p_gt = pearsonr(ccrr_avg, gt_avg)
-                ccrr_spearman_gt, ccrr_sp_gt = spearmanr(ccrr_avg, gt_avg)
-                analysis['ccrr_vs_ground_truth'] = {
-                    'pearson_correlation': float(ccrr_pearson_gt),
-                    'pearson_p_value': float(ccrr_p_gt),
-                    'spearman_correlation': float(ccrr_spearman_gt),
-                    'spearman_p_value': float(ccrr_sp_gt)
-                }
-
-            if svd_avg is not None:
-                svd_pearson_gt, svd_p_gt = pearsonr(svd_avg, gt_avg)
-                svd_spearman_gt, svd_sp_gt = spearmanr(svd_avg, gt_avg)
-                analysis['svd_vs_ground_truth'] = {
-                    'pearson_correlation': float(svd_pearson_gt),
-                    'pearson_p_value': float(svd_p_gt),
-                    'spearman_correlation': float(svd_spearman_gt),
-                    'spearman_p_value': float(svd_sp_gt)
-                }
-
-            if swra_avg is not None:
-                swra_pearson_gt, swra_p_gt = pearsonr(swra_avg, gt_avg)
-                swra_spearman_gt, swra_sp_gt = spearmanr(swra_avg, gt_avg)
-                analysis['swra_vs_ground_truth'] = {
-                    'pearson_correlation': float(swra_pearson_gt),
-                    'pearson_p_value': float(swra_p_gt),
-                    'spearman_correlation': float(swra_spearman_gt),
-                    'spearman_p_value': float(swra_sp_gt)
-                }
-
-        return analysis
-
-    def print_summary(self, detailed: bool = True):
-        """Print experiment summary.
+        For each spammer count k, inject k artificial spammers into
+        the existing R matrices and re-run algorithms. This avoids
+        re-calling the LLM API.
 
         Args:
-            detailed: If True, print detailed comparison analysis
+            spammer_counts: List of k values to test (e.g., [0, 2, 4, 6, 8])
+            num_trials: Number of random trials per k (for variance estimation)
         """
-        stats = self.compute_summary_statistics()
+        if not self.results:
+            print("ERROR: No Track B results to inject spammers into. Run Track B first.")
+            return {}
 
         print(f"\n{'='*60}")
-        print(f"EXPERIMENT SUMMARY")
-        print(f"{'='*60}\n")
+        print(f"Track A: Artificial Spammer Injection")
+        print(f"  Spammer counts to test: {spammer_counts}")
+        print(f"  Trials per count: {num_trials}")
+        print(f"{'='*60}")
 
-        print(f"Dataset: {self.config['dataset']}")
+        track_a_results = {}
 
-        # Handle case when no questions were processed
-        if not stats:
-            print(f"Number of questions: 0")
-            print(f"Number of agents: {self.config['num_agents']}")
-            print(f"\nNo questions were processed. This may be due to:")
-            print(f"  - Difficulty filter returned 0 questions")
-            print(f"  - Dataset loading error")
-            print(f"  - max_samples set to 0")
+        for k in spammer_counts:
+            svd_accs = []
+            mv_accs = []
+
+            for trial in range(num_trials):
+                svd_correct_count = 0
+                mv_correct_count = 0
+
+                for result in self.results:
+                    R_orig = np.array(result['comparison_matrix'])
+                    gt = result['ground_truth']
+                    answer_strings = [a['answer'] for a in result['answers']]
+
+                    # Inject k spammers
+                    R_new, spammer_mask = self.agent_system.inject_artificial_spammers(
+                        R_orig, k=k, seed=trial * 1000 + result['question_idx']
+                    )
+
+                    # Re-run algorithms on modified R
+                    svd_idx_new = spectral_ranking(R_new)
+                    mv_idx_new, _ = majority_voting(R_new)
+
+                    if check_correct(answer_strings[svd_idx_new], gt):
+                        svd_correct_count += 1
+                    if check_correct(answer_strings[mv_idx_new], gt):
+                        mv_correct_count += 1
+
+                svd_acc = svd_correct_count / len(self.results) * 100
+                mv_acc = mv_correct_count / len(self.results) * 100
+                svd_accs.append(svd_acc)
+                mv_accs.append(mv_acc)
+
+            track_a_results[k] = {
+                'svd_mean': float(np.mean(svd_accs)),
+                'svd_std': float(np.std(svd_accs)),
+                'mv_mean': float(np.mean(mv_accs)),
+                'mv_std': float(np.std(mv_accs)),
+            }
+
+            print(f"\n  k={k} spammers:")
+            print(f"    SVD:  {np.mean(svd_accs):.1f}% ± {np.std(svd_accs):.1f}%")
+            print(f"    MV:   {np.mean(mv_accs):.1f}% ± {np.std(mv_accs):.1f}%")
+
+        return track_a_results
+
+    # ─────────────────────────────────────────────────────────────
+    # Summary & Reporting
+    # ─────────────────────────────────────────────────────────────
+
+    def print_summary(self, track_a_results: Dict = None):
+        """Print final experiment summary."""
+        if not self.results:
+            print("No results to summarize.")
             return
 
-        print(f"Number of questions: {stats['num_questions']}")
-        print(f"Number of agents: {self.config['num_agents']}")
-        print(f"Total time: {stats['total_time']:.1f}s\n")
+        n = len(self.results)
 
-        print(f"{'='*60}")
-        print(f"ACCURACY RESULTS")
-        print(f"{'='*60}\n")
+        svd_acc = sum(r['svd_correct'] for r in self.results) / n * 100
+        mv_acc = sum(r['mv_correct'] for r in self.results) / n * 100
+        rand_acc = sum(r['rand_correct'] for r in self.results) / n * 100
+        oracle_acc = sum(r['oracle_correct'] for r in self.results) / n * 100
+        avg_correct = np.mean([r['num_correct_agents'] for r in self.results])
 
-        print("Algorithms:")
-        print(f"  CCRR (Cross-Consistency): {stats['ccrr_accuracy']:.2f}% ({stats['ccrr_correct']}/{stats['num_questions']})")
-        print(f"  SVD (Hammer-Spammer):     {stats['svd_accuracy']:.2f}% ({stats['svd_correct']}/{stats['num_questions']})")
-        print(f"  SWRA v2 (Spectral Weighted): {stats['swra_accuracy']:.2f}% ({stats['swra_correct']}/{stats['num_questions']})")
+        print(f"\n{'═'*60}")
+        print(f"  EXPERIMENT SUMMARY")
+        print(f"{'═'*60}")
+        print(f"  Questions: {n},  Agents: {self.config['num_agents']}")
+        print(f"  Avg agents with correct answer: {avg_correct:.1f}/{self.config['num_agents']}")
+
+        print(f"\n  {'Method':<25} {'Accuracy':>10}")
+        print(f"  {'─'*36}")
+        print(f"  {'SVD Spectral (ours)':<25} {svd_acc:>9.1f}%")
+        print(f"  {'Majority Voting':<25} {mv_acc:>9.1f}%")
+        print(f"  {'Random Selection':<25} {rand_acc:>9.1f}%")
+        print(f"  {'Oracle (upper bound)':<25} {oracle_acc:>9.1f}%")
+
+        # SVD weight analysis: do weights correlate with agent quality?
+        print(f"\n{'═'*60}")
+        print(f"  SVD WEIGHT ANALYSIS (Agent Reliability Detection)")
+        print(f"{'═'*60}")
+
+        # Average weights across all questions, grouped by tier
+        all_weights = np.array([r['svd_weights'] for r in self.results])
+        avg_weights = all_weights.mean(axis=0)
+        tiers = self.results[0]['agent_tiers']
+        names = self.results[0]['agent_names']
+
+        # Average weight per tier
+        for tier in ['strong', 'mid', 'weak']:
+            mask = [t == tier for t in tiers]
+            tier_avg = avg_weights[mask].mean() if any(mask) else 0
+            print(f"  {tier.upper():<8} avg weight: {tier_avg:.4f}")
+
+        # Correlation between weights and individual agent accuracy
+        agent_accs = np.zeros(len(names))
+        for r in self.results:
+            for i, correct in enumerate(r['agent_correctness']):
+                agent_accs[i] += correct
+        agent_accs /= n
+
+        try:
+            from scipy.stats import spearmanr
+            corr, pval = spearmanr(avg_weights, agent_accs)
+            print(f"\n  Spearman(SVD weight, agent accuracy) = {corr:.3f} (p={pval:.3f})")
+            if corr > 0.3 and pval < 0.05:
+                print(f"  → SVD successfully identifies more reliable agents!")
+            elif pval >= 0.05:
+                print(f"  → Not statistically significant (need more questions)")
+        except ImportError:
+            print(f"\n  (Install scipy for correlation analysis)")
+
+        # Print per-agent breakdown
+        print(f"\n  {'Agent':<22} {'Tier':<8} {'Accuracy':>8} {'SVD Wt':>8}")
+        print(f"  {'─'*48}")
+        order = np.argsort(-avg_weights)
+        for idx in order:
+            print(f"  {names[idx]:<22} {tiers[idx]:<8} {agent_accs[idx]*100:>7.1f}% {avg_weights[idx]:>.4f}")
+
+        # Track A results
+        if track_a_results:
+            print(f"\n{'═'*60}")
+            print(f"  TRACK A: SVD vs MV under Spammer Injection")
+            print(f"{'═'*60}")
+            print(f"  {'Spammers':<12} {'SVD Acc':>12} {'MV Acc':>12} {'Δ (SVD-MV)':>12}")
+            print(f"  {'─'*50}")
+            for k in sorted(track_a_results.keys()):
+                r = track_a_results[k]
+                delta = r['svd_mean'] - r['mv_mean']
+                print(f"  k={k:<8} {r['svd_mean']:>9.1f}%   {r['mv_mean']:>9.1f}%   {delta:>+9.1f}%")
+
         print()
 
-        # Sort baselines by accuracy
-        sorted_baselines = sorted(stats['baseline_accuracies'].items(),
-                                 key=lambda x: x[1], reverse=True)
+    # ─────────────────────────────────────────────────────────────
+    # Save results
+    # ─────────────────────────────────────────────────────────────
 
-        print("Baseline Methods:")
-        for baseline, accuracy in sorted_baselines:
-            print(f"  {baseline:<25}: {accuracy:.2f}%")
-
-        # Oracle stats
-        if stats['oracle_stats']:
-            print(f"\n{'='*60}")
-            print(f"ORACLE VALIDATION")
-            print(f"{'='*60}\n")
-            print(f"Average oracle score: {stats['oracle_stats']['avg_score']:.2f}/10")
-            print(f"Oracle agreement rate: {stats['oracle_stats']['oracle_agreement_rate']:.2f}%")
-
-        # Latent score correlation analysis
-        if stats.get('latent_score_analysis') and stats['latent_score_analysis']:
-            lsa = stats['latent_score_analysis']
-            print(f"\n{'='*60}")
-            print(f"LATENT SCORE CORRELATION ANALYSIS")
-            print(f"{'='*60}\n")
-            print("This measures how well the algorithms identify agent quality (Hammers vs Spammers)\n")
-
-            # CCRR vs Oracle
-            if lsa.get('ccrr_vs_oracle'):
-                corr = lsa['ccrr_vs_oracle']
-                print(f"CCRR Algorithm vs Oracle:")
-                print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
-                print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
-
-            # SVD vs Oracle
-            if lsa.get('svd_vs_oracle'):
-                corr = lsa['svd_vs_oracle']
-                print(f"\nSVD Algorithm vs Oracle:")
-                print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
-                print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
-
-            # SWRA vs Oracle
-            if lsa.get('swra_vs_oracle'):
-                corr = lsa['swra_vs_oracle']
-                print(f"\nSWRA v2 Algorithm vs Oracle:")
-                print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
-                print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
-
-            # CCRR vs Ground Truth
-            if lsa.get('ccrr_vs_ground_truth'):
-                corr = lsa['ccrr_vs_ground_truth']
-                print(f"\nCCRR Algorithm vs Ground Truth:")
-                print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
-                print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
-
-            # SVD vs Ground Truth
-            if lsa.get('svd_vs_ground_truth'):
-                corr = lsa['svd_vs_ground_truth']
-                print(f"\nSVD Algorithm vs Ground Truth:")
-                print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
-                print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
-
-            # SWRA vs Ground Truth
-            if lsa.get('swra_vs_ground_truth'):
-                corr = lsa['swra_vs_ground_truth']
-                print(f"\nSWRA v2 Algorithm vs Ground Truth:")
-                print(f"  Pearson correlation:  {corr['pearson_correlation']:.4f} (p={corr['pearson_p_value']:.4f})")
-                print(f"  Spearman correlation: {corr['spearman_correlation']:.4f} (p={corr['spearman_p_value']:.4f})")
-
-            print(f"\nInterpretation:")
-            print(f"  - Correlation close to +1: Algorithm correctly identifies agent quality")
-            print(f"  - Higher Spearman: Algorithm correctly ranks agents (Hammers > Spammers)")
-            print(f"  - p-value < 0.05: Statistically significant correlation")
-
-        # Agent usage stats
-        print(f"\n{'='*60}")
-        print(f"AGENT USAGE STATISTICS")
-        print(f"{'='*60}\n")
-
-        total_tokens = sum(a['total_tokens_used'] for a in stats['agent_stats'])
-        total_calls = sum(a['total_calls'] for a in stats['agent_stats'])
-
-        print(f"Total API calls: {total_calls:,}")
-        print(f"Total tokens: {total_tokens:,}")
-
-        # Print detailed comparison analysis
-        if detailed and len(self.results) > 0:
-            # Prepare per-question correctness data
-            results_per_question = []
-            for result in self.results:
-                correctness = {
-                    'ccrr': result['ccrr_correct'],
-                    'svd': result['svd_correct'],
-                    'swra': result['swra_correct'],
-                }
-                # Add baseline correctness
-                for baseline_name, validation in result['baseline_validations'].items():
-                    correctness[baseline_name] = validation['correct']
-                results_per_question.append(correctness)
-
-            # Print enhanced comparison
-            print_comparison_report(stats, results_per_question)
-
-            # Generate LaTeX table
-            if self.config.get('generate_latex', False):
-                latex_table = generate_latex_table(stats)
-                print("\n" + "="*60)
-                print("LATEX TABLE")
-                print("="*60)
-                print(latex_table)
-
-    def save_results(self, intermediate: bool = False):
-        """
-        Save results to file.
-
-        Args:
-            intermediate: Whether this is an intermediate save
-        """
-        output_dir = Path(self.config['output_dir'])
+    def _save(self, prefix: str = "final"):
+        """Save results to JSON."""
+        output_dir = Path(self.config.get('output_dir', 'results'))
         output_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        prefix = "intermediate_" if intermediate else "final_"
-        filename = f"{prefix}results_{timestamp}.json"
-        filepath = output_dir / filename
+        filepath = output_dir / f"{prefix}_results_{timestamp}.json"
 
-        # Prepare data
         data = {
             'config': self.config,
             'results': self.results,
-            'summary': self.compute_summary_statistics()
         }
 
-        # Save
         with open(filepath, 'w') as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, indent=2, default=str)
 
-        print(f"\nResults saved to: {filepath}")
+        print(f"  Saved to {filepath}")
+        return filepath
 
+    def save_results(self, track_a_results: Dict = None):
+        """Save final results including Track A if available."""
+        output_dir = Path(self.config.get('output_dir', 'results'))
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = output_dir / f"final_results_{timestamp}.json"
+
+        data = {
+            'config': self.config,
+            'results': self.results,
+            'track_a': track_a_results,
+        }
+
+        with open(filepath, 'w') as f:
+            json.dump(data, f, indent=2, default=str)
+
+        print(f"\nFinal results saved to: {filepath}")
         return filepath
 
 
+# ═════════════════════════════════════════════════════════════════
+# CLI
+# ═════════════════════════════════════════════════════════════════
+
 def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Run Hammer-Spammer validation experiment")
+    parser = argparse.ArgumentParser(description="Hammer-Spammer LLM Experiment")
 
-    # Dataset options
-    parser.add_argument('--dataset', type=str, default='gsm8k',
-                       choices=['gsm8k', 'math', 'math500'],
-                       help='Dataset to use')
-    parser.add_argument('--split', type=str, default='test',
-                       choices=['train', 'test'],
-                       help='Dataset split')
     parser.add_argument('--num-questions', type=int, default=50,
-                       help='Number of questions to run')
-    parser.add_argument('--difficulty', type=str, default=None,
-                       choices=['easy', 'medium', 'hard'],
-                       help='Difficulty filter (MATH only): easy (L1-2), medium (L3), hard (L4-5)')
-    parser.add_argument('--start-index', type=int, default=0,
-                       help='Starting question index (skip first N questions). '
-                            'For GSM8K: later questions tend to be harder. '
-                            'Example: --start-index 800 for harder problems')
-
-    # Agent options
+                        help='Number of questions to run')
     parser.add_argument('--num-agents', type=int, default=15,
-                       help='Number of agents to use')
-    parser.add_argument('--no-parallel-generation', action='store_true',
-                       help='Disable parallel answer generation')
-    parser.add_argument('--no-parallel-comparison', action='store_true',
-                       help='Disable parallel comparisons')
+                        help='Number of agents (max 15)')
+    parser.add_argument('--start-index', type=int, default=0,
+                        help='Start index in GSM8K dataset')
+    parser.add_argument('--split', type=str, default='test',
+                        choices=['train', 'test'])
 
-    # Algorithm options
-    parser.add_argument('--beta', type=float, default=5.0,
-                       help='Bradley-Terry discrimination parameter, beta in [1, 10]')
-    parser.add_argument('--epsilon', type=float, default=0.1,
-                       help='Spammer probability P(z_i = S) = epsilon (e.g. 0.1 or 0.01)')
+    parser.add_argument('--track-a', action='store_true',
+                        help='Also run Track A (spammer injection) analysis')
+    parser.add_argument('--spammer-counts', type=str, default='0,2,4,6,8',
+                        help='Comma-separated spammer counts for Track A')
+    parser.add_argument('--track-a-trials', type=int, default=5,
+                        help='Random trials per spammer count in Track A')
 
-    # Validation options
-    parser.add_argument('--oracle-model', type=str, default='openai/gpt-4o',
-                       help='Oracle model for validation')
-    parser.add_argument('--no-oracle', action='store_true',
-                       help='Disable oracle validation')
-
-    # Output options
-    parser.add_argument('--output-dir', type=str, default='results',
-                       help='Output directory for results')
-    parser.add_argument('--save-frequency', type=int, default=10,
-                       help='Save intermediate results every N questions')
-
-    # Other options
-    parser.add_argument('--verbose', action='store_true',
-                       help='Enable verbose output')
+    parser.add_argument('--no-parallel-gen', action='store_true')
+    parser.add_argument('--no-parallel-cmp', action='store_true')
+    parser.add_argument('--output-dir', type=str, default='results')
+    parser.add_argument('--save-frequency', type=int, default=10)
+    parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--debug', action='store_true',
-                       help='Enable debug mode (use 3 questions)')
+                        help='Debug mode: 3 questions, verbose')
 
     return parser.parse_args()
 
 
 def main():
-    """Main entry point."""
     args = parse_args()
 
-    # Override for debug mode
     if args.debug:
         args.num_questions = 3
         args.verbose = True
-        print("DEBUG MODE: Running with 3 questions only")
+        print("DEBUG MODE: 3 questions\n")
 
-    # Build config
     config = {
-        'dataset': args.dataset,
-        'split': args.split,
         'num_questions': args.num_questions,
-        'difficulty': args.difficulty,
+        'num_agents': min(args.num_agents, len(AGENT_CONFIGS)),
         'start_index': args.start_index,
-        'num_agents': args.num_agents,
-        'parallel_generation': not args.no_parallel_generation,
-        'parallel_comparison': not args.no_parallel_comparison,
-        'beta': args.beta,
-        'epsilon': args.epsilon,
-        'oracle_model': args.oracle_model,
-        'use_oracle': not args.no_oracle,
+        'split': args.split,
+        'parallel_generation': not args.no_parallel_gen,
+        'parallel_comparison': not args.no_parallel_cmp,
         'output_dir': args.output_dir,
         'save_frequency': args.save_frequency,
-        'verbose': args.verbose
+        'verbose': args.verbose,
     }
 
-    print(f"\n{'='*60}")
-    print(f"Hammer-Spammer Model Validation Experiment")
-    print(f"Problem 2 - LLM Agent System (N={config['num_agents']})")
-    print(f"{'='*60}\n")
+    print(f"{'='*60}")
+    print(f"  Hammer-Spammer Model: LLM Agent Experiment")
+    print(f"  N={config['num_agents']} agents, {config['num_questions']} questions")
+    print(f"{'='*60}")
 
-    print("Configuration:")
-    for key, value in config.items():
-        print(f"  {key}: {value}")
-
-    # Run experiment
+    # ── Track B: Natural experiment ──
     runner = ExperimentRunner(config)
-    runner.run_all_questions()
+    runner.run_all()
 
-    # Print summary
-    runner.print_summary()
+    # ── Track A: Spammer injection (optional) ──
+    track_a_results = None
+    if args.track_a:
+        spammer_counts = [int(x) for x in args.spammer_counts.split(',')]
+        track_a_results = runner.run_track_a(
+            spammer_counts=spammer_counts,
+            num_trials=args.track_a_trials,
+        )
 
-    # Save final results
-    output_path = runner.save_results(intermediate=False)
+    # ── Print summary & save ──
+    runner.print_summary(track_a_results)
+    filepath = runner.save_results(track_a_results)
 
-    print(f"\n{'='*60}")
-    print(f"Experiment complete!")
-    print(f"Results saved to: {output_path}")
-    print(f"{'='*60}\n")
+    print(f"\nDone! Results at: {filepath}")
 
 
 if __name__ == "__main__":

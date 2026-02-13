@@ -52,7 +52,7 @@ class CCRRanking:
       Phase 3: Select i* = argmax_i s_hat_i.
     """
 
-    def __init__(self, beta: float = 5.0, epsilon: float = 0.1, T: int = 100):
+    def __init__(self, beta: float = 5.0, epsilon: float = 0.1, T: int = 1000):
         """
         Args:
             beta: Bradley-Terry discrimination parameter (recommended: 3-5)

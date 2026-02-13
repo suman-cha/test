@@ -261,11 +261,22 @@ def normalize_answer(answer: str) -> str:
     if boxed_match:
         answer = boxed_match.group(1)
 
+    # Remove inline LaTeX delimiters \(...\) and \[...\]
+    answer = re.sub(r'\\\((.*?)\\\)', r'\1', answer)  # \(x\) -> x
+    answer = re.sub(r'\\\[(.*?)\\\]', r'\1', answer)  # \[x\] -> x
+
+    # Remove dollar sign delimiters $...$ and $$...$$
+    answer = re.sub(r'\$+', '', answer)
+
     # Remove common formatting characters
     answer = answer.replace(',', '')  # Remove commas from numbers
-    answer = answer.replace('$', '')  # Remove dollar signs
     answer = answer.replace('%', '')  # Remove percent signs
-    answer = answer.replace('\\', '')  # Remove backslashes
+    answer = answer.replace('\\', '')  # Remove remaining backslashes
+
+    # Remove parentheses (often left from LaTeX)
+    answer = answer.replace('(', '').replace(')', '')
+    answer = answer.replace('[', '').replace(']', '')
+    answer = answer.replace('{', '').replace('}', '')
 
     # Remove extra whitespace
     answer = ' '.join(answer.split())

@@ -18,37 +18,34 @@ class AgentSystem:
     """Orchestrate N=15 agents to answer questions and perform comparisons."""
 
     def __init__(self, agent_configs: List[Dict], api_key: str,
+                 epsilon: float = 0.1,
                  parallel_generation: bool = True,
-                 parallel_comparison: bool = True,
-                 spammer_indices: List[int] = None,
-                 spammer_seed: int = 42):
+                 parallel_comparison: bool = True):
         """
-        Initialize agent system.
+        Initialize agent system with Hammer-Spammer model.
 
         Args:
             agent_configs: List of agent configuration dictionaries
             api_key: OpenRouter API key
+            epsilon: Spammer probability P(z_i = S) = epsilon
             parallel_generation: Use parallel execution for answer generation
             parallel_comparison: Use parallel execution for comparisons
-            spammer_indices: List of agent indices to force as synthetic spammers.
-                           These agents will make purely random comparisons.
-                           E.g., [12, 13, 14] makes last 3 agents spammers.
-            spammer_seed: Random seed for spammer comparisons (for reproducibility)
         """
         self.agent_configs = agent_configs
         self.api_key = api_key
         self.N = len(agent_configs)
+        self.epsilon = epsilon
         self.parallel_generation = parallel_generation
         self.parallel_comparison = parallel_comparison
-        self.spammer_indices = set(spammer_indices or [])
-        self.spammer_seed = spammer_seed
-        self.spammer_rng = np.random.RandomState(spammer_seed)
+
+        # Draw agent types: z_i ∈ {H, S} with P(z_i = S) = epsilon
+        # 1 = hammer, 0 = spammer (fixed for all questions)
+        self.agent_types = (np.random.random(self.N) >= self.epsilon).astype(int)
+        num_hammers = int(np.sum(self.agent_types))
+        num_spammers = self.N - num_hammers
 
         # Initialize agents
         print(f"Initializing {self.N} agents...")
-        if self.spammer_indices:
-            print(f"  WARNING: {len(self.spammer_indices)} agents will be FORCED as synthetic spammers: {sorted(self.spammer_indices)}")
-
         self.agents = []
         for config in agent_configs:
             agent = LLMAgent(
@@ -59,9 +56,10 @@ class AgentSystem:
             self.agents.append(agent)
 
         print(f"Agent system ready with {self.N} agents")
-        if self.spammer_indices:
-            spammer_names = [self.agents[i].name for i in sorted(self.spammer_indices)]
-            print(f"  Synthetic spammers: {', '.join(spammer_names)}")
+        print(f"  Hammer-Spammer assignment (ε={self.epsilon}): {num_hammers} hammers, {num_spammers} spammers")
+        for i in range(self.N):
+            type_str = "H" if self.agent_types[i] == 1 else "S"
+            print(f"    Agent {i} ({self.agents[i].name}): {type_str}")
 
     def generate_all_answers(self, question: str, verbose: bool = True) -> List[Dict[str, Any]]:
         """
@@ -140,10 +138,10 @@ class AgentSystem:
         """
         Construct R ∈ {±1}^(N×N) via pairwise comparisons.
 
-        Each agent i compares its answer against all other answers.
-        R[i,j] = 1 if agent i thinks its answer >= answer j
-        R[i,j] = -1 if agent i thinks answer j is better
-        R[i,i] = 1 (diagonal - agent prefers own answer)
+        Implements the Hammer-Spammer model:
+        - Hammer agents (z_i = H): use real LLM comparison with full reasoning
+        - Spammer agents (z_i = S): R_ij ~ uniform({-1, 1}), no API call
+        - R_ii = 1 for all agents
 
         Args:
             question: The original question
@@ -154,83 +152,83 @@ class AgentSystem:
             R: numpy array of shape (N, N) with values in {-1, 1}
         """
         if verbose:
+            num_hammers = int(np.sum(self.agent_types))
+            num_spammers = self.N - num_hammers
             print(f"\nConstructing comparison matrix ({self.N}×{self.N})...")
+            print(f"  Agent types: {num_hammers} hammers, {num_spammers} spammers (ε={self.epsilon})")
 
         # Initialize comparison matrix with diagonal = 1
         R = np.ones((self.N, self.N), dtype=int)
 
-        # Total number of comparisons: N * (N-1)
-        total_comparisons = self.N * (self.N - 1)
+        # === Spammer rows: R_ij ~ uniform({-1, 1}), no API calls ===
+        for i in range(self.N):
+            if self.agent_types[i] == 0:  # Spammer
+                for j in range(self.N):
+                    if i != j:
+                        R[i, j] = 1 if np.random.random() < 0.5 else -1
 
-        if self.parallel_comparison:
-            # Parallel execution
-            # Comparisons are simpler than generation, so use more workers
-            with ThreadPoolExecutor(max_workers=min(8, total_comparisons)) as executor:
-                # Submit all comparison tasks with future-to-task mapping
+        # === Hammer rows: real LLM comparison with full reasoning ===
+        hammer_tasks = []
+        for i in range(self.N):
+            if self.agent_types[i] == 1:  # Hammer
+                for j in range(self.N):
+                    if i != j:
+                        hammer_tasks.append((i, j))
+
+        if verbose and hammer_tasks:
+            print(f"  Running {len(hammer_tasks)} LLM comparisons (hammers only)...")
+
+        if hammer_tasks and self.parallel_comparison:
+            # Parallel execution for hammer comparisons
+            with ThreadPoolExecutor(max_workers=min(8, len(hammer_tasks))) as executor:
                 future_to_task = {}
+                for i, j in hammer_tasks:
+                    future = executor.submit(
+                        self.agents[i].compare_answers,
+                        question,
+                        answers[i]['answer'],
+                        answers[j]['answer'],
+                        answers[i].get('reasoning', ''),
+                        answers[j].get('reasoning', '')
+                    )
+                    future_to_task[future] = (i, j)
 
-                for i in range(self.N):
-                    for j in range(self.N):
-                        if i != j:  # Skip diagonal
-                            future = executor.submit(
-                                self.agents[i].compare_answers,
-                                question,
-                                answers[i]['answer'],
-                                answers[j]['answer']
-                            )
-                            future_to_task[future] = (i, j)
-
-                # Collect results with progress bar
                 if verbose:
                     pbar = tqdm(total=len(future_to_task), desc="Pairwise comparisons")
 
                 for future in as_completed(future_to_task):
                     i, j = future_to_task[future]
                     try:
-                        result = future.result()
-
-                        # Force spammer behavior: random comparison
-                        if i in self.spammer_indices:
-                            R[i, j] = self.spammer_rng.choice([-1, 1])
-                        else:
-                            R[i, j] = result
-
-                        if verbose:
-                            pbar.update(1)
+                        R[i, j] = future.result()
                     except Exception as e:
                         print(f"Error in comparison ({i}, {j}): {e}")
-                        # Default: agent prefers own answer
-                        R[i, j] = 1
-                        if verbose:
-                            pbar.update(1)
+                        R[i, j] = 1 if np.random.random() < 0.5 else -1
+                    if verbose:
+                        pbar.update(1)
 
                 if verbose:
                     pbar.close()
 
-        else:
-            # Sequential execution
+        elif hammer_tasks:
+            # Sequential execution for hammer comparisons
             if verbose:
-                pbar = tqdm(total=total_comparisons, desc="Pairwise comparisons")
+                pbar = tqdm(total=len(hammer_tasks), desc="Pairwise comparisons")
 
-            for i in range(self.N):
-                for j in range(self.N):
-                    if i != j:  # Skip diagonal
-                        try:
-                            # Force spammer behavior: random comparison
-                            if i in self.spammer_indices:
-                                R[i, j] = self.spammer_rng.choice([-1, 1])
-                            else:
-                                R[i, j] = self.agents[i].compare_answers(
-                                    question,
-                                    answers[i]['answer'],
-                                    answers[j]['answer']
-                                )
-                        except Exception as e:
-                            print(f"Error in comparison ({i}, {j}): {e}")
-                            R[i, j] = 1  # Default: prefer own answer
+            for i, j in hammer_tasks:
+                try:
+                    R[i, j] = self.agents[i].compare_answers(
+                        question,
+                        answers[i]['answer'],
+                        answers[j]['answer'],
+                        answers[i].get('reasoning', ''),
+                        answers[j].get('reasoning', '')
+                    )
+                except Exception as e:
+                    print(f"Error in comparison ({i}, {j}): {e}")
+                    R[i, j] = 1 if np.random.random() < 0.5 else -1
 
-                        if verbose:
-                            pbar.update(1)
+                if verbose:
+                    pbar.update(1)
 
             if verbose:
                 pbar.close()
@@ -244,12 +242,6 @@ class AgentSystem:
             print(f"Comparison matrix constructed: shape={R.shape}")
             print(f"  Positive comparisons: {np.sum(R == 1)} ({100*np.sum(R == 1)/R.size:.1f}%)")
             print(f"  Negative comparisons: {np.sum(R == -1)} ({100*np.sum(R == -1)/R.size:.1f}%)")
-
-            if self.spammer_indices:
-                # Report spammer statistics
-                num_spammers = len(self.spammer_indices)
-                spammer_ratio = num_spammers / self.N
-                print(f"  Synthetic spammers: {num_spammers}/{self.N} ({100*spammer_ratio:.1f}%)")
 
         return R
 
@@ -295,6 +287,7 @@ class AgentSystem:
             'question': question,
             'answers': answers,
             'comparison_matrix': R,
+            'agent_types': self.agent_types.tolist(),
             'ground_truth': ground_truth,
             'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
             'elapsed_time': elapsed_time

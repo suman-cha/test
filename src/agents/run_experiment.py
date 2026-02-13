@@ -74,23 +74,12 @@ class ExperimentRunner:
         print(f"\nInitializing {config['num_agents']} agents...")
         agent_configs = AGENT_CONFIGS[:config['num_agents']]
 
-        # Configure synthetic spammers
-        spammer_indices = None
-        if config.get('spammer_indices'):
-            spammer_indices = config['spammer_indices']
-        elif config.get('spammer_ratio') and config['spammer_ratio'] > 0:
-            # Auto-select last N agents as spammers based on ratio
-            num_spammers = int(config['num_agents'] * config['spammer_ratio'])
-            spammer_indices = list(range(config['num_agents'] - num_spammers, config['num_agents']))
-            print(f"Auto-selecting {num_spammers} agents as synthetic spammers (ratio={config['spammer_ratio']})")
-
         self.agent_system = AgentSystem(
             agent_configs=agent_configs,
             api_key=api_key,
+            epsilon=config['epsilon'],
             parallel_generation=config['parallel_generation'],
-            parallel_comparison=config['parallel_comparison'],
-            spammer_indices=spammer_indices,
-            spammer_seed=config.get('spammer_seed', 42)
+            parallel_comparison=config['parallel_comparison']
         )
 
         # Initialize algorithms
@@ -280,6 +269,9 @@ class ExperimentRunner:
 
             # Agent latent score evaluation
             'agent_evaluation': agent_evaluation,
+
+            # Agent types (1=hammer, 0=spammer)
+            'agent_types': experiment_data.get('agent_types'),
 
             # Metadata
             'timestamp': experiment_data['timestamp'],
@@ -688,21 +680,11 @@ def parse_args():
     parser.add_argument('--no-parallel-comparison', action='store_true',
                        help='Disable parallel comparisons')
 
-    # Spammer options
-    parser.add_argument('--spammer-ratio', type=float, default=0.0,
-                       help='Ratio of synthetic spammers (0.0-1.0). E.g., 0.1 = 10%% spammers. '
-                            'Spammers are selected from last N agents.')
-    parser.add_argument('--spammer-indices', type=str, default=None,
-                       help='Comma-separated list of agent indices to force as spammers. '
-                            'E.g., "12,13,14" makes agents 12, 13, 14 spammers.')
-    parser.add_argument('--spammer-seed', type=int, default=42,
-                       help='Random seed for spammer comparisons (for reproducibility)')
-
     # Algorithm options
     parser.add_argument('--beta', type=float, default=5.0,
-                       help='Quality gap parameter')
+                       help='Bradley-Terry discrimination parameter, beta in [1, 10]')
     parser.add_argument('--epsilon', type=float, default=0.1,
-                       help='Minimum quality threshold')
+                       help='Spammer probability P(z_i = S) = epsilon (e.g. 0.1 or 0.01)')
 
     # Validation options
     parser.add_argument('--oracle-model', type=str, default='openai/gpt-4o',
@@ -735,16 +717,6 @@ def main():
         args.verbose = True
         print("DEBUG MODE: Running with 3 questions only")
 
-    # Parse spammer indices if provided
-    spammer_indices = None
-    if args.spammer_indices:
-        try:
-            spammer_indices = [int(x.strip()) for x in args.spammer_indices.split(',')]
-        except ValueError:
-            print(f"ERROR: Invalid spammer indices: {args.spammer_indices}")
-            print("Expected comma-separated integers, e.g., '12,13,14'")
-            return
-
     # Build config
     config = {
         'dataset': args.dataset,
@@ -760,11 +732,7 @@ def main():
         'use_oracle': not args.no_oracle,
         'output_dir': args.output_dir,
         'save_frequency': args.save_frequency,
-        'verbose': args.verbose,
-        # Spammer configuration
-        'spammer_ratio': args.spammer_ratio,
-        'spammer_indices': spammer_indices,
-        'spammer_seed': args.spammer_seed
+        'verbose': args.verbose
     }
 
     print(f"\n{'='*60}")

@@ -9,6 +9,7 @@ import os
 import time
 import json
 import re
+import random
 import requests
 from typing import Dict, Optional, Any
 from datetime import datetime
@@ -286,30 +287,41 @@ The final answer should be concise (a number, expression, or short phrase), not 
             result = result[:300] + "..."
         return result
 
-    def compare_answers(self, question: str, my_answer: str, other_answer: str) -> int:
+    def compare_answers(self, question: str, my_answer: str, other_answer: str,
+                        my_reasoning: str = '', other_reasoning: str = '') -> int:
         """
         Compare own answer against another answer.
 
         Args:
             question: The original question
-            my_answer: This agent's answer
-            other_answer: Another agent's answer
+            my_answer: This agent's final answer
+            other_answer: Another agent's final answer
+            my_reasoning: This agent's full reasoning/solution
+            other_reasoning: Other agent's full reasoning/solution
 
         Returns:
-            1 if my_answer is better or equal, -1 if other_answer is better
+            1 if Answer A is better, -1 if Answer B is better
         """
+        # Format answers with reasoning if available
+        if my_reasoning and other_reasoning:
+            answer_a_text = f"Final Answer: {my_answer}\nReasoning:\n{my_reasoning}"
+            answer_b_text = f"Final Answer: {other_answer}\nReasoning:\n{other_reasoning}"
+        else:
+            answer_a_text = my_answer
+            answer_b_text = other_answer
+
         prompt = f"""You are evaluating two answers to a math problem. Determine which answer is better.
 
 Question: {question}
 
-Answer A (your answer): {my_answer}
+Answer A:
+{answer_a_text}
 
-Answer B (other answer): {other_answer}
+Answer B:
+{answer_b_text}
 
-Which answer is better? Consider correctness, reasoning, and clarity.
-Respond with ONLY ONE WORD: either "A" if Answer A is better or equal, or "B" if Answer B is clearly better.
-
-Your response (A or B):"""
+Which answer is better in terms of correctness and quality of reasoning?
+Respond with ONLY ONE WORD: "A" or "B"."""
 
         messages = [
             {"role": "user", "content": prompt}
@@ -322,21 +334,19 @@ Your response (A or B):"""
                 content = response['choices'][0]['message']['content'].strip().upper()
 
                 # Parse response - look for A or B
-                if 'A' in content[:10]:  # Check first few characters
-                    return 1  # My answer is better/equal
-                elif 'B' in content[:10]:
-                    return -1  # Other answer is better
-                else:
-                    # Default: prefer own answer if unclear
+                if 'A' in content[:10]:
                     return 1
+                elif 'B' in content[:10]:
+                    return -1
+                else:
+                    # Ambiguous response — random to avoid systematic bias
+                    return random.choice([1, -1])
             else:
-                # Default: prefer own answer if no response
-                return 1
+                return random.choice([1, -1])
 
         except Exception as e:
             print(f"Error in comparison for {self.name}: {e}")
-            # Default: prefer own answer on error
-            return 1
+            return random.choice([1, -1])
 
     def get_stats(self) -> Dict[str, Any]:
         """

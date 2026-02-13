@@ -24,8 +24,34 @@ class Baselines:
         Returns:
             Index of most popular answer (first occurrence if tie)
         """
+        # Import normalize_answer from run_experiment
+        # (we need proper numeric normalization: "8" = "8.00")
+        import sys
+        import re
+
+        def normalize_answer_local(s: str) -> str:
+            """Normalize answer (same logic as run_experiment)."""
+            s = str(s).strip().lower()
+            s = s.replace(',', '').replace('$', '').replace('%', '')
+            s = s.replace('\\', '').replace('{', '').replace('}', '')
+            s = s.strip('.')
+
+            # Try extracting and normalizing a number
+            match = re.search(r'-?\d+\.?\d*', s)
+            if match:
+                num_str = match.group()
+                try:
+                    num = float(num_str)
+                    if num == int(num):
+                        return str(int(num))
+                    else:
+                        return str(num)
+                except ValueError:
+                    return num_str
+            return s
+
         # Normalize answers for comparison
-        normalized = [ans.strip().lower() for ans in answers]
+        normalized = [normalize_answer_local(ans) for ans in answers]
 
         # Count occurrences
         counter = Counter(normalized)

@@ -45,9 +45,12 @@ class DatasetLoader:
             if self.dataset_name == 'gsm8k':
                 # GSM8K dataset
                 self.dataset = load_dataset('gsm8k', 'main', split=self.split)
-            elif self.dataset_name == 'math' or self.dataset_name == 'math500':
-                # MATH dataset (lighteval/MATH)
-                self.dataset = load_dataset('lighteval/MATH', split=self.split)
+            elif self.dataset_name == 'math500':
+                # MATH-500 curated evaluation dataset (500 problems, pre-extracted answers)
+                self.dataset = load_dataset('HuggingFaceH4/MATH-500', split='test')
+            elif self.dataset_name == 'math':
+                # Full MATH dataset (competition_math)
+                self.dataset = load_dataset('hendrycks/competition_math', split=self.split)
             else:
                 raise ValueError(f"Unknown dataset: {self.dataset_name}")
 
@@ -88,7 +91,12 @@ class DatasetLoader:
             # GSM8K answers are in format "#### NUMBER"
             answer = self._extract_gsm8k_answer(item['answer'])
 
-        elif self.dataset_name in ['math', 'math500']:
+        elif self.dataset_name == 'math500':
+            # MATH-500 format: {'problem': str, 'answer': str} - answer already extracted!
+            question = item['problem']
+            answer = item['answer']
+
+        elif self.dataset_name == 'math':
             # MATH format: {'problem': str, 'solution': str}
             question = item['problem']
             # MATH solutions contain the final answer, extract it
@@ -158,15 +166,26 @@ class DatasetLoader:
         """
         if self.difficulty_filter == 'hard':
             # Level 4-5
-            return dataset.filter(lambda x: x.get('level', '').startswith('Level 4') or
-                                           x.get('level', '').startswith('Level 5'))
+            if self.dataset_name == 'math500':
+                # MATH-500 uses integer level field
+                return dataset.filter(lambda x: x.get('level', 0) >= 4)
+            else:
+                # Full MATH uses string "Level X" format
+                return dataset.filter(lambda x: x.get('level', '').startswith('Level 4') or
+                                               x.get('level', '').startswith('Level 5'))
         elif self.difficulty_filter == 'medium':
             # Level 3
-            return dataset.filter(lambda x: x.get('level', '').startswith('Level 3'))
+            if self.dataset_name == 'math500':
+                return dataset.filter(lambda x: x.get('level', 0) == 3)
+            else:
+                return dataset.filter(lambda x: x.get('level', '').startswith('Level 3'))
         elif self.difficulty_filter == 'easy':
             # Level 1-2
-            return dataset.filter(lambda x: x.get('level', '').startswith('Level 1') or
-                                           x.get('level', '').startswith('Level 2'))
+            if self.dataset_name == 'math500':
+                return dataset.filter(lambda x: x.get('level', 0) <= 2)
+            else:
+                return dataset.filter(lambda x: x.get('level', '').startswith('Level 1') or
+                                               x.get('level', '').startswith('Level 2'))
         else:
             return dataset
 

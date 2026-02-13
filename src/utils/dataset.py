@@ -49,8 +49,15 @@ class DatasetLoader:
                 # MATH-500 curated evaluation dataset (500 problems, pre-extracted answers)
                 self.dataset = load_dataset('HuggingFaceH4/MATH-500', split='test')
             elif self.dataset_name == 'math':
-                # Full MATH dataset (competition_math)
-                self.dataset = load_dataset('hendrycks/competition_math', split=self.split)
+                # Full MATH dataset - load all 7 subsets and concatenate
+                from datasets import concatenate_datasets
+                subsets = ['algebra', 'counting_and_probability', 'geometry',
+                          'intermediate_algebra', 'number_theory', 'prealgebra', 'precalculus']
+                datasets_list = []
+                for subset in subsets:
+                    ds = load_dataset('EleutherAI/hendrycks_math', subset, split=self.split)
+                    datasets_list.append(ds)
+                self.dataset = concatenate_datasets(datasets_list)
             else:
                 raise ValueError(f"Unknown dataset: {self.dataset_name}")
 
@@ -170,22 +177,20 @@ class DatasetLoader:
                 # MATH-500 uses integer level field
                 return dataset.filter(lambda x: x.get('level', 0) >= 4)
             else:
-                # Full MATH uses string "Level X" format
-                return dataset.filter(lambda x: x.get('level', '').startswith('Level 4') or
-                                               x.get('level', '').startswith('Level 5'))
+                # EleutherAI/hendrycks_math uses string level field ("1", "2", etc.)
+                return dataset.filter(lambda x: x.get('level', '0') in ['4', '5'])
         elif self.difficulty_filter == 'medium':
             # Level 3
             if self.dataset_name == 'math500':
                 return dataset.filter(lambda x: x.get('level', 0) == 3)
             else:
-                return dataset.filter(lambda x: x.get('level', '').startswith('Level 3'))
+                return dataset.filter(lambda x: x.get('level', '0') == '3')
         elif self.difficulty_filter == 'easy':
             # Level 1-2
             if self.dataset_name == 'math500':
                 return dataset.filter(lambda x: x.get('level', 0) <= 2)
             else:
-                return dataset.filter(lambda x: x.get('level', '').startswith('Level 1') or
-                                               x.get('level', '').startswith('Level 2'))
+                return dataset.filter(lambda x: x.get('level', '0') in ['1', '2'])
         else:
             return dataset
 

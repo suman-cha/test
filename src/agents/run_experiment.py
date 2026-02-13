@@ -328,6 +328,17 @@ class ExperimentRunner:
         print(f"{'='*60}\n")
 
         print(f"Dataset: {self.config['dataset']}")
+
+        # Handle case when no questions were processed
+        if not stats:
+            print(f"Number of questions: 0")
+            print(f"Number of agents: {self.config['num_agents']}")
+            print(f"\nNo questions were processed. This may be due to:")
+            print(f"  - Difficulty filter returned 0 questions")
+            print(f"  - Dataset loading error")
+            print(f"  - max_samples set to 0")
+            return
+
         print(f"Number of questions: {stats['num_questions']}")
         print(f"Number of agents: {self.config['num_agents']}")
         print(f"Total time: {stats['total_time']:.1f}s\n")

@@ -177,20 +177,20 @@ class DatasetLoader:
                 # MATH-500 uses integer level field
                 return dataset.filter(lambda x: x.get('level', 0) >= 4)
             else:
-                # EleutherAI/hendrycks_math uses string level field ("1", "2", etc.)
-                return dataset.filter(lambda x: x.get('level', '0') in ['4', '5'])
+                # EleutherAI/hendrycks_math uses "Level X" string format
+                return dataset.filter(lambda x: x.get('level', '') in ['Level 4', 'Level 5'])
         elif self.difficulty_filter == 'medium':
             # Level 3
             if self.dataset_name == 'math500':
                 return dataset.filter(lambda x: x.get('level', 0) == 3)
             else:
-                return dataset.filter(lambda x: x.get('level', '0') == '3')
+                return dataset.filter(lambda x: x.get('level', '') == 'Level 3')
         elif self.difficulty_filter == 'easy':
             # Level 1-2
             if self.dataset_name == 'math500':
                 return dataset.filter(lambda x: x.get('level', 0) <= 2)
             else:
-                return dataset.filter(lambda x: x.get('level', '0') in ['1', '2'])
+                return dataset.filter(lambda x: x.get('level', '') in ['Level 1', 'Level 2'])
         else:
             return dataset
 

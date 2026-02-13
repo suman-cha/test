@@ -108,10 +108,20 @@ def normalize_answer(s: str) -> str:
     s = s.replace(',', '').replace('$', '').replace('%', '')
     s = s.replace('\\', '').replace('{', '').replace('}', '')
     s = s.strip('.')
-    # Try extracting a number
+
+    # Try extracting and normalizing a number
     match = re.search(r'-?\d+\.?\d*', s)
     if match:
-        return match.group()
+        num_str = match.group()
+        try:
+            # Convert to float, then check if it's a whole number
+            num = float(num_str)
+            if num == int(num):
+                return str(int(num))  # Return as integer string (8.00 → "8")
+            else:
+                return str(num)  # Return as float string
+        except ValueError:
+            return num_str
     return s
 
 

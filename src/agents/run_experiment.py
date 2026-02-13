@@ -168,7 +168,7 @@ Respond with ONLY "CORRECT" or "INCORRECT" - nothing else."""
         return normalize_answer(answer) == normalize_answer(ground_truth)
 
 
-def check_correct(answer: str, ground_truth: str, api_key: str = None, use_llm: bool = True) -> bool:
+def check_correct(answer: str, ground_truth: str, api_key: str = None, use_llm: bool = False) -> bool:
     """
     Check if an answer matches the ground truth.
 
@@ -176,7 +176,7 @@ def check_correct(answer: str, ground_truth: str, api_key: str = None, use_llm: 
         answer: The answer to check
         ground_truth: The correct answer
         api_key: OpenRouter API key (required if use_llm=True)
-        use_llm: If True, use GPT-4o for semantic checking; if False, use string matching
+        use_llm: If True, use GPT-4o for semantic checking; if False, use string matching (default: False)
 
     Returns:
         True if correct, False otherwise

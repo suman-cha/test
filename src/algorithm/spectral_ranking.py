@@ -1,14 +1,23 @@
 """
-Spectral Ranking Algorithm for Hammer-Spammer Model (Problem 1)
+Spectral Ranking Algorithm for Hammer-Spammer Model (Karger's Theorem II.3)
 
-Uses SVD to automatically estimate agent reliability and produce
-weighted aggregation of comparisons.
+Uses SVD to identify reliable judges and weight their comparisons.
 
-Key insight:
-- Hammer agents produce rows that share common patterns (true score order)
-- Spammer agents produce random noise rows
-- Top SVD component captures the shared hammer pattern
-- u₁² provides reliability weights for each agent
+Karger's Theorem II.3 shows the fundamental gap:
+- Majority voting: Δ_MV ~ 1/(q²) log(1/ε)    [treats all judges equally]
+- Spectral method: Δ_spectral ~ 1/q log(1/ε)  [weights by reliability]
+  → Quadratic improvement in quality gap q
+
+Key mechanism:
+1. Right singular vector v₁ of comparison matrix R identifies judge reliability
+2. Hammers (reliable judges) get high weight |v₁|, spammers get low weight
+3. Weighted aggregation uses only reliable judges' comparisons
+4. This separation produces dramatic improvement over Borda count
+
+Direct analog in our setting:
+- v₁ identifies which agents are reliable judges (hammer vs spammer)
+- Use v₁-weighted comparisons to score each agent's answer quality
+- High reliability judges dominate the final ranking
 """
 
 import numpy as np
@@ -38,7 +47,13 @@ class SpectralRanking:
 
     def select_best(self, R: np.ndarray, return_details: bool = False):
         """
-        Select the best answer using spectral ranking.
+        Select the best answer using spectral ranking (Karger's Theorem II.3).
+
+        Key mechanism (per Karger):
+        1. Right singular vector v₁ identifies judge reliability (hammers vs spammers)
+        2. Weight comparisons by judge reliability (not treating all judges equally)
+        3. This achieves Δ ~ 1/q (vs Δ ~ 1/q² for majority voting)
+           → Quadratic improvement in quality gap q
 
         Args:
             R: N×N comparison matrix with values in {-1, +1}
@@ -55,32 +70,32 @@ class SpectralRanking:
         R_tilde = R.copy().astype(float)
         np.fill_diagonal(R_tilde, 0.0)
 
-        # Step 2: SVD to estimate reliability
-        # Use top singular component to find shared hammer pattern
+        # Step 2: SVD to identify reliable judges
+        # R = U Σ V^T
+        # Right singular vector v₁ captures judge reliability patterns
         U, s, Vt = np.linalg.svd(R_tilde, full_matrices=False)
 
-        # u₁: left singular vector (agent patterns)
-        u1 = U[:, 0]
+        # v₁: RIGHT singular vector (judge reliability)
+        # Vt is V^T, so v₁ = Vt[0, :]
+        v1 = Vt[0, :]
 
-        # Reliability weights: square of u₁ components
-        # (sign doesn't matter, only magnitude)
-        weights = u1 ** 2
+        # Judge reliability weights from v₁
+        # Square to get positive weights (magnitude matters, not sign)
+        weights = v1 ** 2
 
-        # Normalize weights to sum to N (for interpretability)
+        # Normalize to sum to N (for interpretability)
         weights = weights * (N / weights.sum())
 
         # Store for diagnostics
         self.weights = weights
         self.singular_values = s
 
-        # Step 3: Compute weighted scores
-        # score_j = -Σᵢ wᵢ · Rᵢⱼ
-        # Negative sign: R_ij = -1 means "agent i thinks j is better"
-        # Higher score = better answer
-        scores = np.zeros(N)
-        for j in range(N):
-            # Weighted sum of column j (excluding diagonal)
-            scores[j] = -np.sum(weights * R_tilde[:, j])
+        # Step 3: Weighted aggregation using reliable judges
+        # score_j = -Σᵢ wᵢ · R[i,j]
+        #   = -sum of reliable judges' comparisons about agent j
+        # R[i,j] = -1 means judge i thinks j is better than themselves
+        # So negative sign makes higher score = better quality
+        scores = -weights @ R_tilde  # Matrix multiplication: weights^T @ R_tilde
 
         # Step 4: Select best
         best_idx = int(np.argmax(scores))

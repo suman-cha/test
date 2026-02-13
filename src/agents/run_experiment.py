@@ -60,10 +60,13 @@ class ExperimentRunner:
 
         # Initialize dataset
         print(f"\nLoading dataset: {config['dataset']}")
+        difficulty_str = f" (difficulty: {config.get('difficulty', 'all')})" if config.get('difficulty') else ""
+        print(f"Difficulty filter: {config.get('difficulty', 'all')}{difficulty_str}")
         self.dataset = DatasetLoader(
             dataset_name=config['dataset'],
             split=config['split'],
-            max_samples=config['num_questions']
+            max_samples=config['num_questions'],
+            difficulty_filter=config.get('difficulty')
         )
 
         # Initialize agent system
@@ -409,6 +412,9 @@ def parse_args():
                        help='Dataset split')
     parser.add_argument('--num-questions', type=int, default=50,
                        help='Number of questions to run')
+    parser.add_argument('--difficulty', type=str, default=None,
+                       choices=['easy', 'medium', 'hard'],
+                       help='Difficulty filter (MATH only): easy (L1-2), medium (L3), hard (L4-5)')
 
     # Agent options
     parser.add_argument('--num-agents', type=int, default=15,
@@ -460,6 +466,7 @@ def main():
         'dataset': args.dataset,
         'split': args.split,
         'num_questions': args.num_questions,
+        'difficulty': args.difficulty,
         'num_agents': args.num_agents,
         'parallel_generation': not args.no_parallel_generation,
         'parallel_comparison': not args.no_parallel_comparison,

@@ -15,7 +15,8 @@ from datasets import load_dataset
 class DatasetLoader:
     """Load and manage GSM8K/MATH500 datasets for reasoning questions."""
 
-    def __init__(self, dataset_name: str = 'gsm8k', split: str = 'test', max_samples: Optional[int] = 100):
+    def __init__(self, dataset_name: str = 'gsm8k', split: str = 'test', max_samples: Optional[int] = 100,
+                 difficulty_filter: Optional[str] = None):
         """
         Initialize dataset loader.
 
@@ -23,10 +24,16 @@ class DatasetLoader:
             dataset_name: 'gsm8k' or 'math500'
             split: 'train' or 'test'
             max_samples: Maximum number of questions to load (None for all)
+            difficulty_filter: Filter by difficulty (MATH only):
+                - 'hard': Level 4-5 only
+                - 'medium': Level 3 only
+                - 'easy': Level 1-2 only
+                - None: All levels
         """
         self.dataset_name = dataset_name.lower()
         self.split = split
         self.max_samples = max_samples
+        self.difficulty_filter = difficulty_filter
         self.dataset = None
         self._load_dataset()
 
@@ -43,6 +50,11 @@ class DatasetLoader:
                 self.dataset = load_dataset('lighteval/MATH', split=self.split)
             else:
                 raise ValueError(f"Unknown dataset: {self.dataset_name}")
+
+            # Filter by difficulty if specified (MATH only)
+            if self.difficulty_filter and self.dataset_name in ['math', 'math500']:
+                self.dataset = self._filter_by_difficulty(self.dataset)
+                print(f"Filtered to {self.difficulty_filter} difficulty: {len(self.dataset)} questions")
 
             # Limit samples if specified
             if self.max_samples is not None and self.max_samples < len(self.dataset):
@@ -133,6 +145,30 @@ class DatasetLoader:
             return lines[-1].strip()
 
         return solution_text.strip()
+
+    def _filter_by_difficulty(self, dataset) -> Any:
+        """
+        Filter MATH dataset by difficulty level.
+
+        Args:
+            dataset: Hugging Face dataset
+
+        Returns:
+            Filtered dataset
+        """
+        if self.difficulty_filter == 'hard':
+            # Level 4-5
+            return dataset.filter(lambda x: x.get('level', '').startswith('Level 4') or
+                                           x.get('level', '').startswith('Level 5'))
+        elif self.difficulty_filter == 'medium':
+            # Level 3
+            return dataset.filter(lambda x: x.get('level', '').startswith('Level 3'))
+        elif self.difficulty_filter == 'easy':
+            # Level 1-2
+            return dataset.filter(lambda x: x.get('level', '').startswith('Level 1') or
+                                           x.get('level', '').startswith('Level 2'))
+        else:
+            return dataset
 
     def get_batch(self, start_idx: int, batch_size: int) -> List[Tuple[str, str]]:
         """

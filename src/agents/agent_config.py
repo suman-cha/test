@@ -21,10 +21,10 @@ AGENT_CONFIGS = [
     # === HIGH-QUALITY MODELS (3) - Strong Hammers ===
     # NOTE: GPT-4o is reserved as Oracle only (not an agent)
     {
-        "model": "openai/o1-preview",
-        "name": "o1-preview",
+        "model": "openai/gpt-4-turbo",
+        "name": "gpt4-turbo",
         "tier": "high",
-        "description": "OpenAI o1-preview - advanced reasoning model"
+        "description": "OpenAI GPT-4 Turbo - high-performance model"
     },
     {
         "model": "anthropic/claude-opus-4.6",
@@ -206,7 +206,7 @@ if __name__ == "__main__":
     print_agent_summary()
 
     print("\n\n=== Testing Agent Retrieval ===")
-    test_name = "o1-preview"
+    test_name = "gpt4-turbo"
     config = get_agent_config(test_name)
     print(f"\nRetrieved config for '{test_name}':")
     print(f"  Model: {config['model']}")

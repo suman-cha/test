@@ -289,6 +289,8 @@ class AgentSystem:
             'answers': answers,
             'comparison_matrix': R,
             'agent_types': self.agent_types.tolist(),
+            'agent_tiers': [config['tier'] for config in self.agent_configs],
+            'agent_names': [config['name'] for config in self.agent_configs],
             'ground_truth': ground_truth,
             'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
             'elapsed_time': elapsed_time

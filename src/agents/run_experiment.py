@@ -187,7 +187,7 @@ class ExperimentRunner:
         print(f"GT: {ground_truth}")
 
         # ── Step 1-2: Generate answers & build R (via AgentSystem) ──
-        exp_data = self.agent_system.run_question(
+        exp_data = self.agent_system.run_experiment(
             question=question,
             ground_truth=ground_truth,
             verbose=self.config.get('verbose', False),

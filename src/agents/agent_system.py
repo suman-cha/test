@@ -1,7 +1,7 @@
 """
 Agent System for orchestrating multiple LLM agents.
 
-This module manages N=15 agents to answer questions and perform
+This module manages N agents to answer questions and perform
 pairwise comparisons to construct the comparison matrix R.
 """
 
@@ -15,7 +15,7 @@ from .llm_agent import LLMAgent
 
 
 class AgentSystem:
-    """Orchestrate N=15 agents to answer questions and perform comparisons."""
+    """Orchestrate N agents to answer questions and perform comparisons."""
 
     def __init__(self, agent_configs: List[Dict], api_key: str,
                  epsilon: float = 0.1,
@@ -52,7 +52,8 @@ class AgentSystem:
             agent = LLMAgent(
                 model_id=config['model'],
                 name=config['name'],
-                api_key=api_key
+                api_key=api_key,
+                persona=config.get('persona', '')
             )
             self.agents.append(agent)
 

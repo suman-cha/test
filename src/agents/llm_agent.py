@@ -19,7 +19,7 @@ class LLMAgent:
     """Unified interface for calling LLM models via OpenRouter API."""
 
     def __init__(self, model_id: str, name: str, api_key: str,
-                 temperature: float = 0.0, max_tokens: int = 500):
+                 persona: str = '', temperature: float = 0.0, max_tokens: int = 500):
         """
         Initialize LLM agent.
 
@@ -27,12 +27,17 @@ class LLMAgent:
             model_id: OpenRouter model identifier (e.g., "openai/gpt-4o")
             name: Human-readable agent name
             api_key: OpenRouter API key
+            persona: System prompt that shapes the agent's behavior.
+                     Empty string = use model's default behavior.
+                     Example: "You are a careful mathematician who shows all work step-by-step."
+                     Same model + different persona = different agent (방법 2).
             temperature: Sampling temperature (default 0.0 for reproducibility)
             max_tokens: Maximum tokens in response (default 500)
         """
         self.model_id = model_id
         self.name = name
         self.api_key = api_key
+        self.persona = persona
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
@@ -152,9 +157,10 @@ Final Answer: [your answer here]
 
 The final answer should be concise (a number, expression, or short phrase), not a full explanation."""
 
-        messages = [
-            {"role": "user", "content": prompt}
-        ]
+        messages = []
+        if self.persona:
+            messages.append({"role": "system", "content": self.persona})
+        messages.append({"role": "user", "content": prompt})
 
         start_time = time.time()
         response = self._make_api_call(messages)
@@ -323,9 +329,10 @@ Answer B:
 Which answer is better in terms of correctness and quality of reasoning?
 Respond with ONLY ONE WORD: "A" or "B"."""
 
-        messages = [
-            {"role": "user", "content": prompt}
-        ]
+        messages = []
+        if self.persona:
+            messages.append({"role": "system", "content": self.persona})
+        messages.append({"role": "user", "content": prompt})
 
         try:
             response = self._make_api_call(messages)
@@ -365,7 +372,8 @@ Respond with ONLY ONE WORD: "A" or "B"."""
 
     def __repr__(self) -> str:
         """String representation of the agent."""
-        return f"LLMAgent(name={self.name}, model={self.model_id})"
+        persona_str = f", persona='{self.persona[:30]}...'" if self.persona else ""
+        return f"LLMAgent(name={self.name}, model={self.model_id}{persona_str})"
 
 
 if __name__ == "__main__":

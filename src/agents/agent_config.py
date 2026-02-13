@@ -1,8 +1,8 @@
 """
-Agent configuration for N=15 diverse LLM agents.
+Agent configuration for N=10 diverse LLM agents.
 
-This module defines the configurations for 15 different agents using
-various models to create natural hammer-spammer dynamics.
+This module defines the configurations for 10 different agents using
+various models and personas to create natural hammer-spammer dynamics.
 
 IMPORTANT: GPT-4o (openai/gpt-4o) is reserved as the Oracle model for
 validation and should NOT be included as an agent to avoid bias in
@@ -14,133 +14,111 @@ SVD가 작동하려면 E[R̃]에 의미 있는 low-rank 구조가 필요함.
 이를 위해 적어도 일부 에이전트의 row가 실제 품질 순서를 반영하는
 일관된 패턴을 가져야 함.
 
-- Strong 모델 2~3개가 있으면, 그 row들이 서로 비슷한 패턴을 공유하면서
+- Strong 모델 2개가 있으면, 그 row들이 서로 비슷한 패턴을 공유하면서
   SVD의 top singular vector를 지배함. 이게 "신호"임.
 - 약한 모델의 row는 노이즈로 처리됨.
-- 전부 약한 모델이면, 어떤 row도 일관된 패턴이 없어서 SVD가 잡을 신호가 없음.
 
-구성: 3 high-tier + 5 mid-tier + 7 low-tier = 15
+구성: 2 high-tier + 3 mid-tier + 5 low-tier = 10
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 from typing import List, Dict
 
-# N=15 agent configurations
+# N=10 agent configurations
 # Distribution:
-# - 3 high-tier models (Strong Hammers) — 핵심 신호원. 답변 정확도 + 비교 판단 모두 신뢰 가능
-# - 5 mid-tier models (Moderate Hammers) — noisy하지만 어느 정도 일관된 패턴 제공
-# - 7 low-tier models (Spammer 후보) — 초저렴 모델, 비교 판단이 거의 랜덤에 가까움
+# - 2 high-tier models (Strong Hammers) — 핵심 신호원
+# - 3 mid-tier models (Moderate Hammers) — noisy하지만 일관된 패턴
+# - 5 low-tier models (Spammer 후보) — 비교 판단이 거의 랜덤
 #
-# Note: spammer는 --epsilon 또는 코드에서 인위적으로 지정
+# 방법 1 (서로 다른 모델) + 방법 2 (같은 모델 + 다른 페르소나)를 혼합.
+# persona 필드로 에이전트 행동을 차별화.
 
 AGENT_CONFIGS = [
-    # === HIGH-TIER MODELS (3) - Strong Hammers (Core Signal) ===
-    # 이 모델들이 SVD의 top singular vector를 지배하는 "신호"를 만듦.
-    # 답변도 정확하고, 비교 판단도 신뢰할 수 있음.
-    # API 비용이 들지만 핵심 신호원이므로 반드시 필요.
+    # === HIGH-TIER MODELS (2) - Strong Hammers (Core Signal) ===
+    # SVD의 top singular vector를 지배하는 핵심 신호원.
+    # persona 없음 — 모델의 자연스러운 능력이 최고 품질의 신호.
     {
         "model": "anthropic/claude-sonnet-4",
         "name": "claude-sonnet",
         "tier": "high",
+        "persona": "",
         "description": "Anthropic Claude Sonnet 4 - strong reasoning, reliable comparisons"
     },
     {
         "model": "google/gemini-2.5-pro",
         "name": "gemini-pro",
         "tier": "high",
+        "persona": "",
         "description": "Google Gemini 2.5 Pro - strong math, accurate judgments"
     },
-    {
-        "model": "openai/gpt-4-turbo",
-        "name": "gpt4-turbo",
-        "tier": "high",
-        "description": "OpenAI GPT-4 Turbo - near GPT-4o quality at lower cost"
-    },
 
-    # === MID-TIER MODELS (5) - Moderate Hammers (Noisy Signal) ===
-    # 비용 대비 효율이 좋음. 비교 판단이 noisy하지만 완전 랜덤은 아님.
-    # β가 낮은 hammer 역할 — SVD에서 중간 크기의 u₁ 가중치를 받음.
+    # === MID-TIER MODELS (3) - Moderate Hammers (Noisy Signal) ===
+    # β가 낮은 hammer 역할 — SVD에서 중간 크기의 u₁ 가중치.
+    # 페르소나로 비교 판단 스타일에 분산 부여.
     {
         "model": "openai/gpt-4o-mini",
         "name": "gpt4o-mini",
         "tier": "mid",
-        "description": "OpenAI GPT-4o Mini - cost-efficient, decent quality"
+        "persona": "You are a careful mathematician who shows all work step-by-step.",
+        "description": "OpenAI GPT-4o Mini - careful step-by-step solver"
     },
     {
         "model": "anthropic/claude-haiku-4.5",
         "name": "claude-haiku",
         "tier": "mid",
-        "description": "Anthropic Claude Haiku 4.5 - fast and affordable"
+        "persona": "You are very conservative and double-check every calculation.",
+        "description": "Anthropic Claude Haiku 4.5 - conservative double-checker"
     },
     {
         "model": "google/gemini-2.5-flash",
         "name": "gemini-flash",
         "tier": "mid",
-        "description": "Google Gemini 2.5 Flash - fast, cheap, good for math"
-    },
-    {
-        "model": "openai/gpt-3.5-turbo",
-        "name": "gpt35-turbo",
-        "tier": "mid",
-        "description": "OpenAI GPT-3.5 Turbo - baseline mid-tier performance"
-    },
-    {
-        "model": "qwen/qwen-2.5-72b-instruct",
-        "name": "qwen-72b",
-        "tier": "mid",
-        "description": "Qwen 2.5 72B - strong open-source alternative"
+        "persona": "",
+        "description": "Google Gemini 2.5 Flash - fast and cheap"
     },
 
-    # === LOW-TIER MODELS (7) - Spammer Candidates (Noise) ===
-    # 비교 판단이 거의 랜덤에 가까움 → SVD에서 u₁ 가중치 ≈ 0.
-    # Majority voting에서는 이것들이 strong 모델의 신호를 희석시키지만,
-    # SVD 기반에서는 자동으로 무시됨 — 이게 알고리즘의 핵심 장점.
+    # === LOW-TIER MODELS (5) - Spammer Candidates (Noise) ===
+    # SVD에서 u₁ 가중치 ≈ 0 → 자동 무시.
+    # 페르소나로 다양성 부여: "성급한 에이전트", "학생 에이전트" 등.
     {
         "model": "meta-llama/llama-3.1-8b-instruct",
-        "name": "llama-31-8b-1",
+        "name": "llama-31-8b",
         "tier": "low",
-        "description": "Meta Llama 3.1 8B #1"
+        "persona": "Answer quickly and concisely. Do not overthink.",
+        "description": "Meta Llama 3.1 8B - quick/hasty solver"
     },
     {
         "model": "mistralai/mistral-7b-instruct",
-        "name": "mistral-7b-1",
+        "name": "mistral-7b",
         "tier": "low",
-        "description": "Mistral 7B #1"
+        "persona": "You are a student learning math. Try your best.",
+        "description": "Mistral 7B - student persona"
     },
     {
         "model": "google/gemma-2-9b-it",
         "name": "gemma-9b",
         "tier": "low",
-        "description": "Google Gemma 2 9B"
-    },
-    {
-        "model": "deepseek/deepseek-chat",
-        "name": "deepseek",
-        "tier": "low",
-        "description": "DeepSeek Chat"
+        "persona": "Solve this creatively, using unconventional approaches.",
+        "description": "Google Gemma 2 9B - creative/unconventional"
     },
     {
         "model": "meta-llama/llama-3.2-3b-instruct",
         "name": "llama-32-3b",
         "tier": "low",
-        "description": "Meta Llama 3.2 3B - small model"
-    },
-    {
-        "model": "meta-llama/llama-3.2-1b-instruct",
-        "name": "llama-32-1b",
-        "tier": "low",
-        "description": "Meta Llama 3.2 1B - smallest model"
+        "persona": "You rely on intuition and pattern recognition to solve problems.",
+        "description": "Meta Llama 3.2 3B - intuition-based"
     },
     {
         "model": "meta-llama/llama-3-8b-instruct",
         "name": "llama-3-8b",
         "tier": "low",
-        "description": "Llama 3 8B - older generation"
+        "persona": "You are a quick problem solver who finds shortcuts and patterns.",
+        "description": "Llama 3 8B - shortcut seeker"
     },
 ]
 
-# Verify we have exactly N=15 agents
-assert len(AGENT_CONFIGS) == 15, f"Expected 15 agents, got {len(AGENT_CONFIGS)}"
+N_AGENTS = len(AGENT_CONFIGS)
+assert N_AGENTS == 10, f"Expected 10 agents, got {N_AGENTS}"
 
 
 def get_agent_config(name: str) -> Dict:
@@ -184,7 +162,7 @@ def get_agent_names() -> List[str]:
 
 def print_agent_summary():
     """Print summary of all configured agents."""
-    print(f"\n=== Agent Configuration Summary (N={len(AGENT_CONFIGS)}) ===\n")
+    print(f"\n=== Agent Configuration Summary (N={N_AGENTS}) ===\n")
 
     for tier in ['high', 'mid', 'low']:
         tier_agents = get_agents_by_tier(tier)
@@ -197,11 +175,13 @@ def print_agent_summary():
         print(f"\n{tier_name}: {len(tier_agents)} agents")
         print("-" * 60)
         for i, agent in enumerate(tier_agents, 1):
-            print(f"{i}. {agent['name']:<20} | {agent['model']}")
+            persona_tag = f' [{agent["persona"][:40]}...]' if agent.get("persona") else ''
+            print(f"{i}. {agent['name']:<20} | {agent['model']}{persona_tag}")
             print(f"   {agent['description']}")
 
 
 # Alternative configuration using personas (fallback if model diversity unavailable)
+# 같은 모델에 시스템 프롬프트를 다르게 줘서 다양성을 만드는 방법 2.
 PERSONA_CONFIGS = [
     "You are a careful mathematician who shows all work step-by-step.",
     "You are a quick problem solver who finds shortcuts and patterns.",
@@ -212,16 +192,10 @@ PERSONA_CONFIGS = [
     "You are an efficient solver who prioritizes speed while maintaining accuracy.",
     "You approach problems methodically using formal mathematical notation.",
     "You are a practical solver who tests answers with concrete examples.",
-    "You are an experienced educator who explains reasoning clearly.",
-    "You are a competitive problem solver who seeks elegant solutions.",
-    "You are a systematic thinker who follows algorithmic approaches.",
-    "You are a visual thinker who uses diagrams and geometric reasoning.",
-    "You are a logical reasoner who builds proofs step-by-step.",
-    "You are a heuristic solver who uses estimation and approximation."
+    "You are a student learning math. Try your best.",
 ]
 
-# Verify we have exactly N=15 personas as backup
-assert len(PERSONA_CONFIGS) == 15, f"Expected 15 personas, got {len(PERSONA_CONFIGS)}"
+assert len(PERSONA_CONFIGS) == N_AGENTS, f"Expected {N_AGENTS} personas, got {len(PERSONA_CONFIGS)}"
 
 
 if __name__ == "__main__":

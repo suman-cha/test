@@ -709,7 +709,7 @@ def parse_args():
                             'Example: --start-index 800 for harder problems')
 
     # Agent options
-    parser.add_argument('--num-agents', type=int, default=15,
+    parser.add_argument('--num-agents', type=int, default=10,
                        help='Number of agents to use')
     parser.add_argument('--no-parallel-generation', action='store_true',
                        help='Disable parallel answer generation')
@@ -774,7 +774,7 @@ def main():
 
     print(f"\n{'='*60}")
     print(f"Hammer-Spammer Model Validation Experiment")
-    print(f"Problem 2 - LLM Agent System (N={config['num_agents']})")
+    print(f"Problem 2 - LLM Agent System (N={config['num_agents']}, high:2/mid:3/low:5)")
     print(f"{'='*60}\n")
 
     print("Configuration:")

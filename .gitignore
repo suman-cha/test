@@ -42,28 +42,13 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 
-# Development/Debug files (keep locally, exclude from git)
+# Exclude all other files (keep only src/, .gitignore, requirements.txt, run_main_test.sh)
+# All results, visualizations, and extra scripts
+results/
+EXPERIMENT_SETUP.md
+run_beta_*.py
+visualize_*.py
 test_*.py
-run_beta_experiment.py
-visualize_results.py
-
-# Results - keep final figures and results, ignore intermediate/test files
-results/*/intermediate_*.json
-results/*/beta_experiment.log
-results/local_test_*/
-results/fixed_track_a/
-
-# Ignore old/duplicate visualizations (keep only clean final versions)
-results/gsm8k_100q/experiment_visualization.*
-results/gsm8k_100q/beta.png
-results/beta_analysis/fig.pdf
-results/beta_analysis/fig.png
-results/beta_analysis/beta_sensitivity.pdf
-results/beta_analysis/beta_sensitivity.png
-
-# Keep these for submission:
-# - results/gsm8k_100q/fig1-4_*.png/pdf (final clean figures)
-# - results/gsm8k_100q/intermediate_results_20260214_024252.json (final data)
-# - results/beta_analysis/beta_sensitivity_quick.png/pdf
-# - results/beta_analysis/beta_results.json
+analyze_*.py
+*.log
 

@@ -16,7 +16,7 @@ class DatasetLoader:
     """Load and manage GSM8K/MATH500 datasets for reasoning questions."""
 
     def __init__(self, dataset_name: str = 'gsm8k', split: str = 'test', max_samples: Optional[int] = 100,
-                 difficulty_filter: Optional[str] = None):
+                 difficulty_filter: Optional[str] = None, start_index: int = 0):
         """
         Initialize dataset loader.
 
@@ -29,11 +29,15 @@ class DatasetLoader:
                 - 'medium': Level 3 only
                 - 'easy': Level 1-2 only
                 - None: All levels
+            start_index: Starting index for sampling (skip first N questions)
+                - For GSM8K: later questions tend to be harder
+                - Example: start_index=500 skips first 500 questions
         """
         self.dataset_name = dataset_name.lower()
         self.split = split
         self.max_samples = max_samples
         self.difficulty_filter = difficulty_filter
+        self.start_index = start_index
         self.dataset = None
         self._load_dataset()
 
@@ -66,9 +70,19 @@ class DatasetLoader:
                 self.dataset = self._filter_by_difficulty(self.dataset)
                 print(f"Filtered to {self.difficulty_filter} difficulty: {len(self.dataset)} questions")
 
-            # Limit samples if specified
-            if self.max_samples is not None and self.max_samples < len(self.dataset):
-                self.dataset = self.dataset.select(range(self.max_samples))
+            # Apply start_index and max_samples
+            if self.start_index > 0 or self.max_samples is not None:
+                end_index = len(self.dataset)
+                if self.max_samples is not None:
+                    end_index = min(self.start_index + self.max_samples, len(self.dataset))
+
+                # Select range [start_index, end_index)
+                indices = range(self.start_index, end_index)
+                if len(indices) == 0:
+                    raise ValueError(f"start_index={self.start_index} is beyond dataset length {len(self.dataset)}")
+
+                self.dataset = self.dataset.select(indices)
+                print(f"Selected questions [{self.start_index}, {end_index}): {len(self.dataset)} questions")
 
             print(f"Loaded {len(self.dataset)} questions from {self.dataset_name}")
 

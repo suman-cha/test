@@ -67,7 +67,8 @@ class ExperimentRunner:
             dataset_name=config['dataset'],
             split=config['split'],
             max_samples=config['num_questions'],
-            difficulty_filter=config.get('difficulty')
+            difficulty_filter=config.get('difficulty'),
+            start_index=config.get('start_index', 0)
         )
 
         # Initialize agent system
@@ -671,6 +672,10 @@ def parse_args():
     parser.add_argument('--difficulty', type=str, default=None,
                        choices=['easy', 'medium', 'hard'],
                        help='Difficulty filter (MATH only): easy (L1-2), medium (L3), hard (L4-5)')
+    parser.add_argument('--start-index', type=int, default=0,
+                       help='Starting question index (skip first N questions). '
+                            'For GSM8K: later questions tend to be harder. '
+                            'Example: --start-index 800 for harder problems')
 
     # Agent options
     parser.add_argument('--num-agents', type=int, default=15,
@@ -723,6 +728,7 @@ def main():
         'split': args.split,
         'num_questions': args.num_questions,
         'difficulty': args.difficulty,
+        'start_index': args.start_index,
         'num_agents': args.num_agents,
         'parallel_generation': not args.no_parallel_generation,
         'parallel_comparison': not args.no_parallel_comparison,

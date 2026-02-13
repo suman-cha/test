@@ -13,9 +13,10 @@ echo ""
 mkdir -p results/quick_test
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-echo "Testing GSM8K (10 questions)..."
+echo "Testing GSM8K (10 harder questions, starting from index 800)..."
 python -m src.agents.run_experiment \
     --dataset gsm8k \
+    --start-index 800 \
     --num-questions 10 \
     --output-dir results/quick_test/gsm8k_${TIMESTAMP} \
     --verbose

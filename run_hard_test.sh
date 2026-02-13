@@ -1,38 +1,44 @@
 #!/bin/bash
-# Hard Problems Test - Test algorithms on difficult problems only
-# MATH Level 4-5 only (hardest problems)
+# Hard Test Script - Run experiments on harder problems
+# Tests with 10 challenging questions to stress-test the system
 
 set -e
 
 echo "========================================"
-echo "Hard Problems Test (Level 4-5 only)"
+echo "Hard Test: Challenging Problems"
 echo "========================================"
-echo ""
-echo "Testing algorithms on the most difficult problems"
-echo "from MATH-500 dataset (Level 4-5)"
 echo ""
 
 # Create results directory
 mkdir -p results/hard_test
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-echo "Running MATH-500 Hard Problems (10 questions, Level 4-5)..."
+echo "Testing GSM8K Hard Problems (questions 800-810)..."
 python -m src.agents.run_experiment \
-    --dataset math500 \
+    --dataset gsm8k \
+    --start-index 800 \
     --num-questions 10 \
-    --difficulty hard \
-    --output-dir results/hard_test/math500_hard_${TIMESTAMP} \
-    --no-parallel-generation \
+    --output-dir results/hard_test/gsm8k_hard_${TIMESTAMP} \
     --verbose
 
 echo ""
 echo "========================================"
-echo "Hard Problems Test Complete!"
+echo ""
+
+echo "Testing MATH Hard Problems (Level 4-5)..."
+python -m src.agents.run_experiment \
+    --dataset math \
+    --difficulty hard \
+    --num-questions 10 \
+    --output-dir results/hard_test/math_hard_${TIMESTAMP} \
+    --verbose
+
+echo ""
+echo "========================================"
+echo "Hard Test Complete!"
 echo "========================================"
 echo ""
 echo "Results saved to:"
+echo "  - results/hard_test/gsm8k_hard_${TIMESTAMP}/"
 echo "  - results/hard_test/math_hard_${TIMESTAMP}/"
-echo ""
-echo "This tests the algorithms' ability to handle"
-echo "the most challenging mathematical problems."
 echo ""
